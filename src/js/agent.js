@@ -72,9 +72,11 @@ new (class Agent extends EventTarget {
     async #callNative(action, message = {}) {
         const token = crypto.randomUUID();
         const result = new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error(`Native host call timed out: ${action}`)), 2000);
             this.addEventListener(
                 token,
                 (ev) => {
+                    clearTimeout(timeout);
                     if (ev.detail?.error) reject(new Error(ev.detail.error));
                     else resolve(ev.detail.data);
                 },
