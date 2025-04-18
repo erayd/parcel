@@ -210,6 +210,10 @@ new (class Agent extends EventTarget {
                     port.postMessage({ action: "plaintext", plaintext: result.plaintext });
                 } else if (message?.action === "config") {
                     // provide the current configuration
+                    let newConfig = await this.#callNative("configure");
+                    if (newConfig?.modified > this.#config.modified) {
+                        this.#setConfig(newConfig);
+                    }
                     port.postMessage({ action: "config", config: this.#config });
                 }
             } catch (err) {
