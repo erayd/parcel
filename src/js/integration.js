@@ -276,11 +276,11 @@ chrome.runtime.onConnect.addListener(async (port) => {
             try {
                 if (!msg.hasOwnProperty("config")) throw new Error("Config is missing.");
                 if (!msg.hasOwnProperty("plaintext")) throw new Error("Plaintext is missing.");
-                fillField(el, msg.plaintext, msg.config);
+                await fillField(el, msg.plaintext, msg.config);
                 if (msg.config.fillRelated) {
                     for (const rel of await getRelatedFields(el)) {
                         try {
-                            fillField(rel, msg.plaintext, msg.config);
+                            await fillField(rel, msg.plaintext, msg.config);
                         } catch (err) {
                             // ignore errors when filling related form fields
                         }
