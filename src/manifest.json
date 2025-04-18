@@ -1,0 +1,29 @@
+{
+    "manifest_version": 3,
+    "version": "0.1.2",
+    "name": "Parcel",
+    "description": "Browser extension for Pass",
+    "homepage_url": "https://github.com/erayd/parcel/",
+    "author": "Steve Gilberd <steve@erayd.net>",
+    "permissions": ["nativeMessaging"],
+    "host_permissions": ["<all_urls>"],
+    "background": {
+        "service_worker": "js/agent.js",
+        "type": "module"
+    },
+    "content_scripts": [
+        {
+            "matches": ["<all_urls>"],
+            "js": ["js/integration.js"],
+            "type": "module",
+            "run_at": "document_start",
+            "all_frames": true
+        }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": ["js/selectors.js", "js/popup.js", "html/popup.html"],
+            "matches": ["<all_urls>"]
+        }
+    ]
+}

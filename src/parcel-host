@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -e
+
+# ISC License
+#
+# Copyright (c) 2023-2025 Erayd LTD
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+# set up the environment
+TOKEN="broadcast"
+ALLOWED_FILES=()
+if [ ! -d "$PASSWORD_STORE_DIR" ]; then
+    parcel_error "Invalid password store directory: $PASSWORD_STORE_DIR" 1
+fi
+PARCELFILE="$PASSWORD_STORE_DIR/.parcel.json"
+
+# set up the configuration
+CONFIG="{}"
+if [ -f "$PARCELFILE" ]; then
+    if ! CONFIG="$(cat "$PARCELFILE")"; then
+        parcel_error "Failed to read config file: $PARCELFILE" 1
+    fi
+else
+    CONFIG="{}"
+fi
+if ! CONFIG="$(jq --arg passdir "$PASSWORD_STORE_DIR" '. + {passdir: $passdir} + (if has("rules") then null else {rules:[]} end)' <<< "$CONFIG")"; then
+    parcel_error "Failed to parse config file: $PARCELFILE" 1
+fi
+
+# get the current config
+function action_configure() {
+    parcel_send "$CONFIG"
+}
+
+# get a list of all the password entries which match the config
+function action_list() {
+    echo "TODO: Make this work on the default MacOS jq version"
+    local OUT="$(
+        find -E "$PASSWORD_STORE_DIR" \( -type f -o -type l \) -not -path "$PASSWORD_STORE_DIR/.*" -not -path "$PASSWORD_STORE_DIR/**/.*" -name '*.gpg' |
+            jq -nR '.entries=[inputs | select(length > 0)]' |
+            jq -s '
+                .[0] * .[1]
+                | . as $top
+                | ($top.rules|map(select(.ignore==false or (has("ignore") | not)).pattern)) as $include
+                | ($top.rules|map(select(.ignore==true).pattern)) as $ignore
+                | .entries | (
+                    map(
+                        .={path: ., name: . | sub("^" + $top.passdir + "/"; "")|sub(".gpg$"; "")}
+                        | . as $entry
+                        | select(
+                            reduce $include[] as $pattern (false; . or ($entry.name|test($pattern)))
+                            and (reduce $ignore[] as $pattern (false; . or ($entry.name|test($pattern)))|not)
+                        )
+                    )
+                    | sort_by(.name)
+
+                )
+            ' \
+                <(echo "$CONFIG") -
+    )"
+
+    # kludgery required to set a global array content using a string of single-quoted strings
+    declare -a LOCAL_AF="( $(jq -rc 'map(.path) | @sh' <<< "$OUT") )"
+    ALLOWED_FILES=( "${LOCAL_AF[@]}" )
+
+    parcel_send "$OUT"
+}
+
+# decrypt and return the contents of a password entry
+function action_decrypt() {
+    local FILE_PATH="$(jq -r '.path' <<< "$1")"
+    local ALLOW=0
+    for ALLOWED in "${ALLOWED_FILES[@]}"; do
+        if [ "$ALLOWED" = "$FILE_PATH" ]; then
+            ALLOW=1
+            break
+        fi
+    done
+    if [ $ALLOW -ne 1 ]; then
+        parcel_error "Access Denied: Path out of scope: $FILE_PATH"
+        return 0
+    fi
+    if [ ! -f "$FILE_PATH" ]; then
+        parcel_error "File not found: $FILE_PATH"
+        return 0
+    fi
+    if ! local OUT="$(gpg --decrypt --quiet --batch --no-tty --yes < "$FILE_PATH" 2>/dev/null)"; then
+        parcel_error "Failed to decrypt $FILE_PATH"
+        return 0
+    fi
+    parcel_send "$(jq -n --arg path "$FILE_PATH" --arg plaintext "$OUT" '{path: $path, plaintext: $plaintext}')"
+}
