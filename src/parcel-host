@@ -43,16 +43,22 @@ function load_config() {
 
 }
 
-# get the current config
-function action_configure() {
+# ensure that the config is up to date
+function update_config() {
     if [[ -f "$PARCELFILE" && "$CONFIG_MODIFIED" -ne "$(stat -L -f %m "$PARCELFILE")" ]]; then
         load_config
     fi
+}
+
+# get the current config
+function action_configure() {
+    update_config
     parcel_send "$CONFIG"
 }
 
 # get a list of all the password entries which match the config
 function action_list() {
+    update_config
     echo "TODO: Make this work on the default MacOS jq version"
     local OUT="$(
         find -E "$PASSWORD_STORE_DIR" \( -type f -o -type l \) -not -path "$PASSWORD_STORE_DIR/.*" -not -path "$PASSWORD_STORE_DIR/**/.*" -name '*.gpg' |
@@ -87,6 +93,7 @@ function action_list() {
 
 # decrypt and return the contents of a password entry
 function action_decrypt() {
+    update_config
     local FILE_PATH="$(jq -r '.path' <<< "$1")"
     local ALLOW=0
     for ALLOWED in "${ALLOWED_FILES[@]}"; do

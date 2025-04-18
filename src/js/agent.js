@@ -213,6 +213,7 @@ new (class Agent extends EventTarget {
                     let newConfig = await this.#callNative("configure");
                     if (newConfig?.modified > this.#config.modified) {
                         this.#setConfig(newConfig);
+                        this.#setEntries(await this.#callNative("list"));
                     }
                     port.postMessage({ action: "config", config: this.#config });
                 }
