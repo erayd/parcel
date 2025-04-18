@@ -284,7 +284,9 @@ new (class Agent extends EventTarget {
             .split("\n")
             .filter((line) => !line.startsWith("//") && line.length);
         for (let suffix = hostname; suffix.length; suffix = suffix.slice(suffix.indexOf(".") + 1)) {
+            if (list.includes(`!${suffix}`)) continue;
             if (list.includes(suffix)) return suffix;
+            if (list.includes(`*.${suffix.slice(suffix.indexOf(".") + 1)}`)) return suffix;
         }
         return hostname;
     }
