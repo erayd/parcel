@@ -101,6 +101,7 @@ export class Schema {
 export const ConfigSchema = {
     type: "object",
     properties: {
+        modified: { type: "integer", required: true, minimum: 1 },
         passdir: { type: "string", required: true },
         cacheTTL: { type: "number", required: true, minimum: 0, default: 300 },
         cacheTTLInteractive: { type: "number", required: true, minimum: 0, default: 10 },
