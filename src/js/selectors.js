@@ -14,5 +14,6 @@ export const targetSelectors = [
     { selector: "input[type=password i]", type: "secret" },
     { selector: "input[autocomplete~=current-password i]", type: "secret" },
     { selector: "input[example=blacklist i]", type: "blacklist", host: ["example.com", "example.org"] },
-    { selector: "input[example=totp i]", type: "totp" },
+    { selector: "input[autocomplete~=one-time-code i]", type: "totp" },
+    { selector: "input[name$=otp i]", type: "totp" },
 ];
