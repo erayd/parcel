@@ -8,6 +8,7 @@ DIST_FILES := \
     parcel-host.asc \
     html/popup.html \
     js/agent.js \
+    js/helpers.js \
     js/integration.js \
     js/popup.js \
     js/schema.js \

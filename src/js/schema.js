@@ -132,7 +132,12 @@ export const ConfigSchema = {
                     onMissing: { type: "string", required: true, enum: ["top", "ntop", "all", "null"], default: "null" },
                     strip: { type: "boolean", required: true, default: true },
                     trim: { type: "boolean", required: true, default: true },
-                    transform: { type: "string", enum: ["totp"] },
+                    transform: {
+                        type: "array",
+                        items: { type: "string", enum: ["totp"] },
+                        required: true,
+                        default: [],
+                    },
                     class: { type: "string", required: true, enum: ["login"], default: "login" },
                 },
             },
@@ -140,6 +145,7 @@ export const ConfigSchema = {
             default: [
                 { name: "secret", pattern: "^(secret|password):", onMissing: "top" },
                 { name: "login", pattern: "^(username|login|email):" },
+                { name: "totp", pattern: "^(otp|totp|2fa|authenticator):", transform: ["totp"] },
             ],
         },
         additionalSelectors: SelectorSchema,

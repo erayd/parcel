@@ -112,6 +112,14 @@ async function fillField(el, plaintext, config) {
     // trim the value if configured
     if (targetRule.trim) fillValue = fillValue.trim();
 
+    // transform the value if configured
+    const Helpers = await import("/js/helpers.js");
+    for (let transform of targetRule?.transform) {
+        if (transform === "totp") {
+            fillValue = await Helpers.Helpers.generateTOTP(fillValue);
+        }
+    }
+
     /** Robust value-setting logic below is largely copied from Browserpass - thanks to all who helped develop it! */
     {
         // Send some keyboard events indicating that value modification has started (no associated keycode)
