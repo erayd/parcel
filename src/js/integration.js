@@ -292,8 +292,9 @@ chrome.runtime.onConnect.addListener(async (port) => {
                 }
             }
             if (!el) {
-                port.postMessage({ action: "error", error: "Unable to select target element." });
+                port.postMessage({ action: "error", error: "Cannot find a suitable fill target." });
                 port.disconnect();
+                return;
             }
         } else {
             return;
