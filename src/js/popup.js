@@ -52,7 +52,9 @@
         });
     }
 
-    if (!tab.url) {
+    if (tab.url) {
+        document.getElementById("origin").textContent = new URL(tab.url).hostname;
+    } else {
         limit = false;
         document.getElementById("origin").classList.add("hidden");
     }
