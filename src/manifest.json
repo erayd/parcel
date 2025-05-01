@@ -5,7 +5,7 @@
     "description": "Browser extension for Pass",
     "homepage_url": "https://github.com/erayd/parcel/",
     "author": "Steve Gilberd <steve@erayd.net>",
-    "permissions": ["nativeMessaging"],
+    "permissions": ["nativeMessaging", "storage"],
     "host_permissions": ["<all_urls>"],
     "background": {
         "service_worker": "js/agent.js",

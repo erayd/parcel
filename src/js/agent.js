@@ -1,5 +1,6 @@
 "use strict";
 import { Schema, ConfigSchema } from "./schema.js";
+import { Helpers } from "./helpers.js";
 
 /**
  * Main agent class
@@ -215,7 +216,12 @@ new (class Agent extends EventTarget {
             try {
                 if (message?.action === "match") {
                     // get matching entries
-                    const result = await this.search(message.url, message.search || "", message.limit);
+                    const result = await this.search(
+                        message.url,
+                        message.search || "",
+                        message.limit,
+                        message.history.map((entry) => entry.path),
+                    );
                     port.postMessage({ action: "match", entries: result });
                 } else if (message?.action === "decrypt") {
                     // decrypt the specified entry
@@ -243,9 +249,10 @@ new (class Agent extends EventTarget {
      * @param {URL} url - The url to find matching entries for.
      * @param {string} search - The search string to match against.
      * @param {boolean} [limit=true] - Whether to limit the search to the current origin.
+     * @param {string[]} [history] - A list of historical paths to include regardless of matches.
      * @returns {object[]} - The matching entries.
      */
-    async search(url, search, limit = true) {
+    async search(url, search, limit = true, history = []) {
         const origin = new URL(url);
         let matches = [];
 
@@ -255,6 +262,10 @@ new (class Agent extends EventTarget {
             const slices = [];
             for (let s = origin.hostname; s.length && s !== suffix; s = s.slice(s.indexOf(".") + 1)) slices.push(s);
             for (let entry of await this.#getEntries(search.length ? this.#config.cacheTTLInteractive : undefined)) {
+                if (history.includes(await Helpers.sha256(entry.path))) {
+                    matches.push(entry);
+                    continue;
+                }
                 const parts = entry.name.split("/").reverse();
                 if (parts.includes(origin.host)) {
                     matches.push(entry);

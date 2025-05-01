@@ -122,6 +122,7 @@ export const ConfigSchema = {
         cacheTTL: { type: "number", required: true, minimum: 0, default: 300 },
         cacheTTLInteractive: { type: "number", required: true, minimum: 0, default: 10 },
         decryptTimeout: { type: "number", required: true, minimum: 1, default: 60 },
+        historyLength: { type: "integer", required: true, minimum: 0, default: 40 },
         targets: {
             type: "array",
             items: {

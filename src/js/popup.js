@@ -1,5 +1,6 @@
 "use strict";
 (async () => {
+    const Helpers = (await import(chrome.runtime.getURL("/js/helpers.js"))).Helpers;
     const token = new URLSearchParams(window.location.search).get("token") || "broadcast";
     const tab = (await chrome.tabs.getCurrent()) || (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
     const tabPort = chrome.tabs.connect(tab.id, { name: token });
@@ -10,6 +11,7 @@
     const port = chrome.runtime.connect({ name: "popup" });
     const ul = document.querySelector("ul");
     let limit = true;
+    let history = [];
 
     // init specific to the popup invocation type
     if (token === "broadcast") {
@@ -53,7 +55,10 @@
     }
 
     if (tab.url) {
-        document.getElementById("origin").textContent = new URL(tab.url).hostname;
+        const url = new URL(tab.url);
+        const hash = await Helpers.sha256(url.origin);
+        document.getElementById("origin").textContent = url.hostname;
+        history = (await chrome.storage.local.get(`history:${hash}`))?.[`history:${hash}`] || [];
     } else {
         limit = false;
         document.getElementById("origin").classList.add("hidden");
@@ -164,8 +169,13 @@
                 });
                 li.appendChild(button);
 
-                li.addEventListener("click", (ev) => {
+                li.addEventListener("click", async (ev) => {
                     port.postMessage({ action: "decrypt", intent: "fill", path: entry.path });
+                    if (history?.[0]?.path === (await Helpers.sha256(entry.path))) {
+                        history[0].when = Date.now();
+                    } else {
+                        history.unshift({ path: await Helpers.sha256(entry.path), when: Date.now() });
+                    }
                 });
 
                 ul.appendChild(li);
@@ -173,6 +183,11 @@
         } else if (msg.action === "plaintext") {
             if (msg.intent === "fill" && !tabPort.disconnected) {
                 tabPort.postMessage({ action: "fill", token, plaintext: msg.plaintext, config: await config });
+                if (tab.url) {
+                    const url = new URL(tab.url);
+                    const hash = await Helpers.sha256(url.origin);
+                    chrome.storage.local.set({ [`history:${hash}`]: history.slice(0, (await config).historyLength) });
+                }
             } else if (msg.intent === "detail") {
                 document.getElementById("plaintext").textContent = msg.plaintext;
                 document.body.style.minHeight = document.getElementById("detail").scrollHeight + "px";
@@ -200,7 +215,7 @@
 
     // re-run the search
     function update() {
-        port.postMessage({ action: "match", url: tab.url || "unknown-url://", search: search.value, limit });
+        port.postMessage({ action: "match", url: tab.url || "unknown-url://", search: search.value, limit, history });
     }
 
     // initial search

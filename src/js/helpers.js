@@ -52,4 +52,18 @@ export class Helpers {
 
         return (num % Math.pow(10, digits)).toString().padStart(digits, "0");
     }
+
+    /**
+     * Generate a SHA-256 hash of a string.
+     * @since 1.0.0
+     * @param {string} str - The string to hash.
+     * @returns {Promise<string>} The SHA-256 hash of the string.
+     */
+    static async sha256(s) {
+        const data = new TextEncoder().encode(s);
+        const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+
+        return hashArray.map((i) => i.toString(16).padStart(2, "0")).join("");
+    }
 }
