@@ -318,6 +318,7 @@ new (class Agent extends EventTarget {
             if (list.includes(`!${suffix}`)) continue;
             if (list.includes(suffix)) return suffix;
             if (list.includes(`*.${suffix.slice(suffix.indexOf(".") + 1)}`)) return suffix;
+            if (suffix.indexOf(".") === -1) break;
         }
         return hostname;
     }
