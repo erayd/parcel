@@ -333,7 +333,7 @@ chrome.runtime.onConnect.addListener(async (port) => {
     }
     port.onMessage.addListener(async (msg) => {
         if (msg?.action === "fill") {
-            // fill the target field, and related fields if connfigured
+            // fill the target field, and related fields if configured
             try {
                 if (!msg.hasOwnProperty("config")) throw new Error("Config is missing.");
                 if (!msg.hasOwnProperty("plaintext")) throw new Error("Plaintext is missing.");
