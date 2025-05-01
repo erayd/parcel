@@ -168,6 +168,7 @@ async function fillField(el, plaintext, config, type = null) {
         // re-set value if unchanged after firing post-fill events
         // (in case of sabotage by the site's own event handlers)
         if ((el.value || el.getAttribute("value")) === initialValue) {
+            await new Promise((resolve) => setTimeout(resolve, 10)); // brief wait to yield execution to the page
             el.setAttribute("value", fillValue);
             el.value = fillValue;
         }
