@@ -35,3 +35,14 @@ for (let s of ["login", "user", "username", "email", "alias"]) {
     targetSelectors.push({ selector: `input[title*=${s} i]`, type: "login" });
     targetSelectors.push({ selector: `input[aria-label*=${s} i]`, type: "login" });
 }
+
+for (let s of ["login", "log-in", "log_in", "signin", "sign-in", "sign_in", "submit", "submit-login", "continue"]) {
+    for (let t of ["input[type=button]", "button"]) {
+        targetSelectors.push({ selector: `${t}[name*=${s} i]`, type: "submit" });
+        targetSelectors.push({ selector: `${t}[id*=${s} i]`, type: "submit" });
+        targetSelectors.push({ selector: `${t}[class*=${s} i]`, type: "submit" });
+        targetSelectors.push({ selector: `${t}[placeholder*=${s} i]`, type: "submit" });
+        targetSelectors.push({ selector: `${t}[title*=${s} i]`, type: "submit" });
+        targetSelectors.push({ selector: `${t}[aria-label*=${s} i]`, type: "submit" });
+    }
+}

@@ -2,20 +2,25 @@
 const targetSelectors = import(chrome.runtime.getURL("/js/selectors.js"));
 
 /**
+ * Configuration object
+ * @since 1.0.0
+ */
+const config = new Promise((resolve) => {
+    const port = chrome.runtime.connect({ name: "config" });
+    port.onMessage.addListener(async (msg) => {
+        if (msg.action === "config") {
+            port.disconnect();
+            resolve(msg.config);
+        }
+    });
+    port.postMessage({ action: "config" });
+});
+
+/**
  * List of valid focus targets.
  * @since 1.0.0
  */
 const validTargets = targetSelectors.then(async (targetSelectors) => {
-    const port = chrome.runtime.connect({ name: "targetSelectors" });
-    const config = new Promise((resolve) => {
-        port.onMessage.addListener(async (msg) => {
-            if (msg.action === "config") {
-                port.disconnect();
-                resolve(msg.config);
-            }
-        });
-    });
-    port.postMessage({ action: "config" });
     let selectors = targetSelectors.targetSelectors.concat((await config).additionalSelectors || []);
     return selectors.filter((t) => t.type !== "blacklist" && (!t.host || t.host.includes(window.location.hostname)));
 });
@@ -35,6 +40,7 @@ const invalidTargets = targetSelectors.then((targetSelectors) =>
  * @returns {string|null} - The target type or null if not found.
  */
 async function getTargetInfo(el) {
+    if (!["text", "email", "tel", "password"].includes(el.type)) return null;
     let finalTarget = null;
     for (let target of await validTargets) {
         if (el.matches(target.selector)) {
@@ -343,6 +349,29 @@ chrome.runtime.onConnect.addListener(async (port) => {
                 }
                 port.postMessage({ action: "close" });
                 document.querySelector(`.parcel-popup-${port.name}`)?.remove();
+
+                const submitTargets = (await validTargets).filter((t) => t.type === "submit");
+                const form = el.closest("form");
+                if (form) {
+                    for (let target of submitTargets) {
+                        let submitButton = form.querySelector(target.selector);
+                        if (submitButton) {
+                            if ((await config)?.autoSubmit) {
+                                submitButton.click();
+                            } else {
+                                submitButton.focus();
+                            }
+                            break;
+                        }
+                    }
+                } else if ((await config)?.autoSubmit) {
+                    el.focus();
+                    for (ev in ["keydown", "keypress", "keyup"]) {
+                        el.dispatchEvent(new KeyboardEvent(ev, { bubbles: true, key: "Enter", code: "Enter", keyCode: 13 }));
+                    }
+                } else {
+                    el.focus();
+                }
             } catch (err) {
                 port.postMessage({ action: "error", error: err.message });
             }
