@@ -262,17 +262,18 @@ new (class Agent extends EventTarget {
             const slices = [];
             for (let s = origin.hostname; s.length && s !== suffix; s = s.slice(s.indexOf(".") + 1)) slices.push(s);
             for (let entry of await this.#getEntries(search.length ? this.#config.cacheTTLInteractive : undefined)) {
-                if (history.includes(await Helpers.sha256(entry.path))) {
-                    matches.push(entry);
+                const hash = await Helpers.sha256(entry.path);
+                if (history.includes(hash)) {
+                    matches.push({ entry, order: history.indexOf(hash) });
                     continue;
                 }
                 const parts = entry.name.split("/").reverse();
                 if (parts.includes(origin.host)) {
-                    matches.push(entry);
+                    matches.push({ entry, order: Math.pow(2, 30) });
                 } else {
                     for (let s of slices) {
                         if (parts.includes(s)) {
-                            matches.push(entry);
+                            matches.push({ entry, order: Math.pow(2, 31) });
                             break;
                         }
                     }
@@ -280,13 +281,19 @@ new (class Agent extends EventTarget {
             }
 
             // origin-matching search
-            matches = matches.filter((entry) => {
-                if (search) {
-                    let p = new RegExp(search, "ui");
-                    return p.test(entry.name);
-                }
-                return true;
-            });
+            matches = matches
+                .filter((entry) => {
+                    if (search) {
+                        let p = new RegExp(search, "ui");
+                        return p.test(entry.entry.name);
+                    }
+                    return true;
+                })
+                .sort((a, b) => {
+                    if (a.order === b.order) return 0;
+                    return a.order < b.order ? -1 : 1;
+                })
+                .map((entry) => entry.entry);
         }
 
         // unrestricted search
