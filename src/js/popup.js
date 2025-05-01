@@ -133,6 +133,8 @@
             }
             for (const entry of msg.entries) {
                 const li = document.createElement("li");
+                if (entry.isInHistory) li.classList.add("history");
+                li.setAttribute("data-sort-order", entry.sortOrder);
 
                 if (entry.rule.tag) {
                     const tag = document.createElement("span");
@@ -151,6 +153,35 @@
                 name.classList.add("name");
                 name.textContent = entry.rule.strip ? entry.name.replace(new RegExp(entry.rule.strip, "ui"), "") : entry.name;
                 li.appendChild(name);
+
+                const url = new URL(tab.url);
+                const hash = await Helpers.sha256(url.origin);
+                for (let he of history) {
+                    if (he.path === (await Helpers.sha256(entry.path))) {
+                        const historyButton = document.createElement("button");
+                        historyButton.classList.add("historyNuke");
+                        historyButton.textContent = "X";
+                        historyButton.setAttribute("title", "Forget this entry");
+                        historyButton.addEventListener("click", (ev) => {
+                            ev.stopPropagation();
+                            history = history.filter((h) => h.path !== he.path);
+                            chrome.storage.local.set({ [`history:${hash}`]: history });
+                            historyButton.remove();
+                            li.remove();
+                            for (let el = ul.lastElementChild; el; el = el.previousElementSibling) {
+                                if (parseInt(el.getAttribute("data-sort-order")) < entry.sortOrder || el.classList.contains("history")) {
+                                    el.insertAdjacentElement("afterend", li);
+                                    break;
+                                }
+                            }
+                            if (!li.parentElement) {
+                                ul.insertAdjacentElement("afterbegin", li);
+                            }
+                        });
+                        li.appendChild(historyButton);
+                        break;
+                    }
+                }
 
                 const button = document.createElement("button");
                 button.classList.add("detail");

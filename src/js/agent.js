@@ -263,20 +263,21 @@ new (class Agent extends EventTarget {
             for (let s = origin.hostname; s.length && s !== suffix; s = s.slice(s.indexOf(".") + 1)) slices.push(s);
             for (let entry of await this.#getEntries(search.length ? this.#config.cacheTTLInteractive : undefined)) {
                 const hash = await Helpers.sha256(entry.path);
-                if (history.includes(hash)) {
-                    matches.push({ entry, order: history.indexOf(hash) });
-                    continue;
-                }
+                entry.isInHistory = history.includes(hash);
+
                 const parts = entry.name.split("/").reverse();
-                if (parts.includes(origin.host)) {
-                    matches.push({ entry, order: Math.pow(2, 30) });
-                } else {
+                entry.matchesHost = parts.includes(origin.host);
+                entry.matchesHostPart = false;
+                if (!entry.matchesHost) {
                     for (let s of slices) {
                         if (parts.includes(s)) {
-                            matches.push({ entry, order: Math.pow(2, 31) });
+                            entry.matchesHostPart = true;
                             break;
                         }
                     }
+                }
+                if (entry.isInHistory || entry.matchesHost || entry.matchesHostPart) {
+                    matches.push(entry);
                 }
             }
 
@@ -285,15 +286,25 @@ new (class Agent extends EventTarget {
                 .filter((entry) => {
                     if (search) {
                         let p = new RegExp(search, "ui");
-                        return p.test(entry.entry.name);
+                        return p.test(entry.name);
                     }
                     return true;
                 })
                 .sort((a, b) => {
-                    if (a.order === b.order) return 0;
-                    return a.order < b.order ? -1 : 1;
-                })
-                .map((entry) => entry.entry);
+                    if (a.matchesHost && !b.matchesHost) return -1;
+                    if (!a.matchesHost && b.matchesHost) return 1;
+                    if (a.matchesHostPart && !b.matchesHostPart) return -1;
+                    if (!a.matchesHostPart && b.matchesHostPart) return 1;
+                    return a.name.localeCompare(b.name);
+                });
+            for (let i = 0; i < matches.length; i++) {
+                matches[i].sortOrder = i;
+            }
+            matches = matches.sort((a, b) => {
+                if (a.isInHistory && !b.isInHistory) return -1;
+                if (!a.isInHistory && b.isInHistory) return 1;
+                return a.sortOrder - b.sortOrder;
+            });
         }
 
         // unrestricted search
@@ -305,6 +316,11 @@ new (class Agent extends EventTarget {
                         if (p.test(entry.name)) matches.push(entry);
                     }
                 }
+            }
+        }
+        for (let i = 0; i < matches.length; i++) {
+            if (!matches[i].hasOwnProperty("sortOrder")) {
+                matches[i].sortOrder = i;
             }
         }
 

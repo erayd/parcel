@@ -81,7 +81,7 @@ ul {
             padding: 0.2em 0.5em;
         }
         .name {
-            margin-right: 5em;
+            margin-right: 0.35em;
             flex-grow: 1;
         }
         .detail {
