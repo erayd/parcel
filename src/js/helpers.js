@@ -75,6 +75,7 @@ export class Helpers {
      * @param {string} type - The target type to use
      */
     static async getValue(plaintext, config, type) {
+        config = await config;
         const targetRule = config.targets.reduce((acc, rule) => {
             if (rule.name === type) {
                 acc = rule;
@@ -100,7 +101,7 @@ export class Helpers {
                 fillValue = plaintext;
             } else if (targetRule.onMissing === "fallback") {
                 if (!targetRule.fallback) throw new Error(`No fallback defined for field type: ${type}`);
-                return await fillField(el, plaintext, config, targetRule.fallback);
+                return await Helpers.getValue(plaintext, config, targetRule.fallback);
             } else if (targetRule.onMissing === "null") {
                 throw new Error(`No value found for field type: ${type}`);
             }
@@ -110,19 +111,15 @@ export class Helpers {
         if (targetRule.trim) fillValue = fillValue.trim();
 
         // transform the value if configured
-        const Helpers = await import("/js/helpers.js");
+        //const Helpers = await import("/js/helpers.js");
         for (let transform of targetRule?.transform) {
             if (transform === "totp-url") {
                 const url = new URL(fillValue);
                 const secret = url.searchParams.get("secret");
                 if (!secret) throw new Error(`No secret found in TOTP URL: ${fillValue}`);
-                fillValue = await Helpers.Helpers.generateTOTP(
-                    secret,
-                    url.searchParams.get("period") || 30,
-                    url.searchParams.get("digits") || 6,
-                );
+                fillValue = await Helpers.generateTOTP(secret, url.searchParams.get("period") || 30, url.searchParams.get("digits") || 6);
             } else if (transform === "totp") {
-                fillValue = await Helpers.Helpers.generateTOTP(fillValue);
+                fillValue = await Helpers.generateTOTP(fillValue);
             }
         }
 
