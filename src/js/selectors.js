@@ -18,6 +18,7 @@ export var targetSelectors = [
     { selector: "input[id=pin i]", type: "secret" },
     { selector: "input[class~=password i]", type: "secret" },
     { selector: "input[class~=pin i]", type: "secret" },
+    { selector: "input[placeholder=password i]", type: "secret" },
 
     // type: totp
     { selector: "input[autocomplete~=one-time-code i]", type: "totp" },
@@ -31,6 +32,7 @@ export var targetSelectors = [
     { selector: "input[type=tel i]", type: "login" },
     { selector: "input[type=number i]", type: "login" },
     { selector: "input[id=vrNetKey i]", type: "login" }, // various German banks
+    { selector: "input[aria-label=username i]", type: "login" },
 ];
 
 for (let s of ["login", "user", "username", "email", "alias", "name"]) {
