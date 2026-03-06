@@ -27,15 +27,15 @@ export var targetSelectors = [
 
     // type: login
     { selector: "input[autocomplete~=username i]", type: "login" },
+    { selector: "input[aria-label=username i]", type: "login" },
     { selector: "input[autocomplete~=email i]", type: "login" },
     { selector: "input[type=email i]", type: "login" },
     { selector: "input[type=tel i]", type: "login" },
     { selector: "input[type=number i]", type: "login" },
     { selector: "input[id=vrNetKey i]", type: "login" }, // various German banks
-    { selector: "input[aria-label=username i]", type: "login" },
 ];
 
-for (let s of ["login", "user", "username", "email", "alias", "name"]) {
+for (let s of ["login", "user", "username", "email"]) {
     targetSelectors.push({ selector: `input[name*=${s} i]`, type: "login" });
     targetSelectors.push({ selector: `input[id*=${s} i]`, type: "login" });
     targetSelectors.push({ selector: `input[class*=${s} i]`, type: "login" });
