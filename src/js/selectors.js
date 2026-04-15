@@ -65,7 +65,7 @@ for (let s of ["login", "log-in", "log_in", "signin", "sign-in", "sign_in", "sub
 }
 
 // exclude password change fields
-for (let s of ["new", "confirm", "change"]) {
+for (let s of ["new", "confirm", "change", "edit"]) {
     for (let t of ["password", "pass", "secret"]) {
         targetSelectors.push({ selector: `input[name*=${s} i][name*=${t} i]`, type: "blacklist" });
         targetSelectors.push({ selector: `input[id*=${s} i][id*=${t} i]`, type: "blacklist" });
