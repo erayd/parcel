@@ -60,6 +60,7 @@
             for (let target of await invalidTargets) {
                 if (el.matches(target.selector)) {
                     finalTarget = null;
+                    el.setAttribute("parcel-blacklist", target.selector);
                     break;
                 }
             }
