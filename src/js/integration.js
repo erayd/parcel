@@ -156,6 +156,7 @@
             }
         });
         const popup = (el._parcelPopup = document.createElement("div"));
+        popup._parcelTarget = el;
         popup._parcelCreated = Date.now();
         popup.setAttribute(
             "style",
@@ -211,9 +212,12 @@
         let popup = document.querySelector(".parcel-popup");
         let targetInfo = await getTargetInfo(target);
         if (targetInfo) {
-            if (popup) popup.remove();
             if (!target._parcelToken) {
                 target._parcelToken = crypto.randomUUID();
+            }
+            if (popup) {
+                popup.remove();
+                if (popup.classList.contains(`parcel-popup-${target._parcelToken}`)) return; // Don't reopen the popup if we just clicked its target field to close it
             }
             target.classList.add(`parcel-target-${target._parcelToken}`);
             target.setAttribute("parcel-selector", targetInfo.selector);
@@ -337,7 +341,11 @@
                     popup.style.width = `${msg.width}px`;
                 }
             } else if (msg?.action === "close") {
-                Helpers.shadowSelector(`.parcel-popup-${port.name}`)?.remove();
+                let popup = Helpers.shadowSelector(`.parcel-popup-${port.name}`);
+                if (popup) {
+                    popup.remove();
+                    popup._parcelTarget?.focus();
+                }
             }
         });
     });
