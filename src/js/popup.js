@@ -332,15 +332,13 @@
             while (ul.firstChild) {
                 ul.removeChild(ul.firstChild);
             }
-            if (!document.querySelector(".no-matches")) {
-                if (!msg.entries.length) {
-                    const p = document.createElement("p");
-                    p.classList.add("list-notice", "no-matches");
-                    p.textContent = "No matching entries";
-                    ul.parentElement.appendChild(p);
-                } else {
-                    document.querySelector(".no-matches")?.remove();
-                }
+            if (!msg.entries.length && !document.querySelector(".no-matches")) {
+                const p = document.createElement("p");
+                p.classList.add("list-notice", "no-matches");
+                p.textContent = "No matching entries";
+                ul.parentElement.appendChild(p);
+            } else if (msg.entries.length) {
+                document.querySelector(".no-matches")?.remove();
             }
             for (const entry of msg.entries) {
                 const li = document.createElement("li");
