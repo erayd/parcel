@@ -310,6 +310,7 @@
             p.textContent = msg.error;
             document.querySelectorAll("p.error").forEach((el) => el.remove());
             document.body.insertAdjacentElement("afterbegin", p);
+            setTimeout(() => p.remove(), 5000);
         }
     });
 
@@ -440,6 +441,7 @@
             document.body.insertAdjacentElement("afterbegin", p);
             document.getElementById("modal-shade").classList.add("hidden");
             p.scrollIntoView({ behavior: "instant", block: "nearest" });
+            setTimeout(() => p.remove(), 5000);
         }
     });
 

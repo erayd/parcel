@@ -60,7 +60,7 @@ body {
 p.error {
     background-color: var(--color-bg-error);
     color: var(--color-text-error);
-    font-size: 13px;
+    font-size: 12.5px;
     margin: 0;
     padding: 2px;
 }
