@@ -8,6 +8,10 @@ DIST_FILES := \
     parcel-host.asc \
     css/popup.css \
     html/popup.html \
+    img/logo-16.png \
+    img/logo-32.png \
+    img/logo-64.png \
+    img/logo-128.png \
     img/icon-copy.svg \
     js/agent.js \
     js/helpers.js \
