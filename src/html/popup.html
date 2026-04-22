@@ -11,17 +11,17 @@
         <template id="parcel-detail-template">
             <style>
                 :host {
-                    background-color: #414141;
-                    color: #c4c4c4;
+                    background-color: var(--color-modal-bg);
+                    color: var(--color-modal-text);
                 }
                 div,
                 parcel-value {
                     height: max-content;
-                    background-color: #494949;
-                    border: 1px solid #525252;
+                    background-color: var(--color-modal-item-bg);
+                    border: 1px solid var(--color-modal-item-border);
                     border-radius: 2px;
                     parcel-plaintext-line:hover {
-                        background-color: #505050;
+                        background-color: var(--color-modal-item-focus);
                     }
                 }
             </style>
@@ -30,9 +30,7 @@
             <style>
                 :host {
                     align-items: center;
-                    background-color: #4a4a4a;
-                    color: #c4c4c4;
-                    border: 1px solid #525252;
+                    color: var(--color-modal-text);
                     display: flex;
                     & > * {
                         padding: 5px;
@@ -41,18 +39,18 @@
                 span,
                 .value-container {
                     &.label {
-                        background-color: #afafaf;
+                        background-color: var(--color-modal-bg-invert);
                         border-radius: 2px 0 0 2px;
-                        color: #414141;
+                        color: var(--color-modal-text-invert);
                         width: 68px;
                         text-align: center;
                     }
                     &.char {
                         &.punct {
-                            color: #d29624;
+                            color: var(--color-modal-highlight-1);
                         }
                         &.digit {
-                            color: #5dd123;
+                            color: var(--color-modal-highlight-2);
                         }
                     }
                     &.spacer {
@@ -86,10 +84,13 @@
         <template id="parcel-plaintext-line-template">
             <style>
                 :host {
-                    border-bottom: 1px solid #505050;
+                    border-bottom: 1px solid var(--color-modal-item-focus);
                     display: flex;
                     align-items: center;
                     gap: 10px;
+                }
+                :host(:last-child) {
+                    border-bottom: none;
                 }
                 .line {
                     flex-grow: 1;
@@ -99,8 +100,8 @@
                     white-space: nowrap;
                     min-width: 0;
                     &:before {
-                        background-color: #505050;
-                        color: #d29624;
+                        background-color: var(--color-modal-item-focus);
+                        color: var(--color-modal-highlight-1);
                         counter-increment: line;
                         content: counter(line);
                         display: inline-block;

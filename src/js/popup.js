@@ -126,7 +126,7 @@
 
                 function refresh() {
                     let remaining = spec.interval - (Date.now() - spec.generatedAt);
-                    container.style.borderImage = `linear-gradient(to right, #bd861a ${(remaining / spec.interval) * 100}%, transparent 0) 1`;
+                    container.style.borderImage = `linear-gradient(to right, var(--color-progress) ${(remaining / spec.interval) * 100}%, transparent 0) 1`;
                     if (remaining < 0) {
                         clearInterval(interval);
                         this.setValue(valueFn);
