@@ -27,13 +27,17 @@ PARCELFILE="$PASSWORD_STORE_DIR/.parcel.json"
 CONFIG="{}"
 CONFIG_MODIFIED=0
 
+function get_mtime() {
+    stat -L -c %Y "$1" 2>/dev/null || stat -L -f %m "$1"
+}
+
 # load the configuration
 function load_config() {
     if [ -f "$PARCELFILE" ]; then
         if ! CONFIG="$(cat "$PARCELFILE")"; then
             parcel_error "Failed to read config file: $PARCELFILE" 1
         fi
-        CONFIG_MODIFIED="$(stat -L -f %m "$PARCELFILE")"
+        CONFIG_MODIFIED="$(get_mtime "$PARCELFILE")"
     else
         CONFIG="{}"
         CONFIG_MODIFIED="$(date +%s)"
@@ -45,7 +49,7 @@ function load_config() {
 
 # ensure that the config is up to date
 function update_config() {
-    if [[ ! -f "$PARCELFILE" || -f "$PARCELFILE" && "$CONFIG_MODIFIED" -ne "$(stat -L -f %m "$PARCELFILE")" ]]; then
+    if [[ ! -f "$PARCELFILE" || -f "$PARCELFILE" && "$CONFIG_MODIFIED" -ne "$(get_mtime "$PARCELFILE")" ]]; then
         load_config
     fi
 }
