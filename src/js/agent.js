@@ -7,6 +7,7 @@ import { Helpers } from "./helpers.js";
  * @since 0.1.0
  */
 new (class Agent extends EventTarget {
+    #connectedNative = false;
     #config;
     #host;
     #entries;
@@ -59,6 +60,7 @@ new (class Agent extends EventTarget {
      */
     #connectNative() {
         this.#host = chrome.runtime.connectNative("com.github.erayd.parcel");
+        this.#connectedNative = true;
         this.#host.onDisconnect.addListener(this.#onNativeDisconnect.bind(this));
         this.#host.onMessage.addListener(this.#onNativeMessage.bind(this));
     }
@@ -85,6 +87,10 @@ new (class Agent extends EventTarget {
         }
         const token = crypto.randomUUID();
         this.#currentNativeCall = new Promise((resolve, reject) => {
+            if (!this.#connectedNative) {
+                reject(new Error("Not connected to native host"));
+                return true;
+            }
             const timer = setTimeout(() => reject(new Error(`Native host call timed out: ${action}`)), timeout);
             this.addEventListener(
                 token,
@@ -131,6 +137,7 @@ new (class Agent extends EventTarget {
      * @returns {void}
      */
     async #onNativeDisconnect() {
+        this.#connectedNative = false;
         if (this.#host.error) {
             console.error(new Error(this.#host.error.message));
         }
@@ -214,6 +221,7 @@ new (class Agent extends EventTarget {
         // listen for messages
         port.onMessage.addListener(async (message) => {
             try {
+                if (!this.#connectedNative) throw new Error("Not connected to native host");
                 if (message?.action === "match") {
                     // get matching entries
                     const result = await this.search(
