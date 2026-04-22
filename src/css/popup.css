@@ -20,8 +20,8 @@
     --color-modal-item-border: light-dark(#c8c8c8, #525252);
     --color-modal-item-focus: light-dark(#d5d5d5, #505050);
     --color-modal-highlight-1: light-dark(#d25524, #d29624);
-    --color-modal-highlight-2: light-dark(#2d880a, #5dd123);
-    --color-progress: #bd861a;
+    --color-modal-highlight-2: light-dark(#3333ee, #5dd123);
+    --color-progress: light-dark(#3333ee, #bd861a);
 }
 * {
     box-sizing: border-box;
