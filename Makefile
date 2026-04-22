@@ -22,7 +22,11 @@ chrome: extension
 .PHONY: firefox
 firefox: extension
 	rsync -av src/dist/ firefox/
-	jq ".background.persistent=true|.applications.gecko.id=\"parcel@mozilla.org\"|.applications.gecko.strict_min_version=\"78.0\"" src/dist/manifest.json > firefox/manifest.json
+	jq "\
+		.background.persistent=true \
+		|.background.scripts=[.background.service_worker] \
+		|del(.background.persistent, .background.service_worker) \
+	        " src/dist/manifest.json > firefox/manifest.json
 
 .PHONY: release
 release: WEBPACK_MODE=production
