@@ -96,6 +96,7 @@ ul {
     &,
     input {
         background-color: var(--color-bg-input);
+        color: var(--color-text);
     }
     input,
     #origin {
