@@ -41,6 +41,7 @@ export var targetSelectors = [
     { selector: "input[id=vrNetKey i]", type: "login" }, // various German banks
     { selector: "input[id^=IDToken i]", type: "login" }, // spark.co.nz
     { selector: "form[class*=login i] input[name=name i]", type: "login" }, // nz-cms.nz
+    { selector: "#login input#name, #login input.name, #login input[name*=name i]", type: "login" }, // Mikrotik + various
 
     // type: submit
     { selector: "input[type=submit i]", type: "submit" },
