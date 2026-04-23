@@ -14,10 +14,12 @@ export var targetSelectors = [
     { selector: "input[type=password i]", type: "secret" },
     { selector: "input[name=password i]", type: "secret" },
     { selector: "input[id=password i]", type: "secret" },
+    { selector: "input[name~=pwd i]", type: "secret" },
     { selector: "input[type=pin i]", type: "secret" },
     { selector: "input[name=pin i]", type: "secret" },
     { selector: "input[id=pin i]", type: "secret" },
     { selector: "input[class~=password i]", type: "secret" },
+    { selector: "input[class~=pwd i]", type: "secret" },
     { selector: "input[class~=pin i]", type: "secret" },
     { selector: "input[placeholder=password i]", type: "secret" },
 
@@ -42,6 +44,7 @@ export var targetSelectors = [
     { selector: "input[id^=IDToken i]", type: "login" }, // spark.co.nz
     { selector: "form[class*=login i] input[name=name i]", type: "login" }, // nz-cms.nz
     { selector: "#login input#name, #login input.name, #login input[name*=name i]", type: "login" }, // Mikrotik + various
+    { selector: "form[action*=login i] input[name=name i]", type: "login" }, // Supermicro IPMI
 
     // type: submit
     { selector: "input[type=submit i]", type: "submit" },
