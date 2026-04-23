@@ -41,5 +41,14 @@
         "32": "img/logo-32.png",
         "64": "img/logo-64.png",
         "128": "img/logo-128.png"
+    },
+    "commands": {
+        "_execute_action": {
+            "suggested_key": {
+                "default": "Ctrl+Shift+K",
+                "mac": "Command+Shift+K"
+            },
+            "description": "Open Parcel popup"
+        }
     }
 }
