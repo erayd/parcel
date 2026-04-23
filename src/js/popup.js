@@ -4,8 +4,45 @@
     const Helpers = (await import(chrome.runtime.getURL("/js/helpers.js"))).Helpers;
     const Plaintext = (await import(chrome.runtime.getURL("/js/plaintext.js"))).Plaintext;
     const token = new URLSearchParams(window.location.search).get("token") || "broadcast";
-    const tab = (await chrome.tabs.getCurrent()) || (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
-    const tabPort = chrome.tabs.connect(tab.id, { name: token });
+
+    /**
+     * Connect to the active tab content script, falling back to relay via the background service if necessary
+     * @since 1.0.0
+     * @returns {Promise<{tab: chrome.tabs.Tab, tabPort: chrome.runtime.Port}>}
+     */
+    async function connectToTab() {
+        if (chrome.tabs?.getCurrent && chrome.tabs?.query && chrome.tabs?.connect) {
+            const tab = (await chrome.tabs.getCurrent()) || (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+            return { tab, tabPort: chrome.tabs.connect(tab.id, { name: token }) };
+        }
+
+        const tabPort = chrome.runtime.connect({ name: `popup-bridge:${token}` });
+        const tab = await new Promise((resolve, reject) => {
+            const onMessage = (msg) => {
+                if (msg?.action === "tab-context") {
+                    tabPort.onMessage.removeListener(onMessage);
+                    tabPort.onDisconnect.removeListener(onDisconnect);
+                    resolve(msg.tab);
+                } else if (msg?.action === "error") {
+                    tabPort.onMessage.removeListener(onMessage);
+                    tabPort.onDisconnect.removeListener(onDisconnect);
+                    reject(new Error(msg.error));
+                }
+            };
+            const onDisconnect = () => {
+                tabPort.onMessage.removeListener(onMessage);
+                tabPort.onDisconnect.removeListener(onDisconnect);
+                reject(new Error(chrome.runtime.lastError?.message || "Disconnected from the active tab."));
+            };
+
+            tabPort.onMessage.addListener(onMessage);
+            tabPort.onDisconnect.addListener(onDisconnect);
+        });
+
+        return { tab, tabPort };
+    }
+
+    const { tab, tabPort } = await connectToTab();
     tabPort.onDisconnect.addListener(() => {
         chrome.runtime.lastError; // suppress errors on pages where the content script is not injected
         tabPort.disconnected = true;

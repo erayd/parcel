@@ -232,6 +232,11 @@ new (class Agent extends EventTarget {
      * @returns {void}
      */
     async #connect(port) {
+        if (port.name?.startsWith("popup-bridge:")) {
+            await this.#bridgePopup(port);
+            return;
+        }
+
         // listen for messages
         port.onMessage.addListener(async (message) => {
             try {
@@ -263,6 +268,43 @@ new (class Agent extends EventTarget {
                 console.error(err);
                 port.postMessage({ action: "error", error: err.message });
             }
+        });
+    }
+
+    /**
+     * Relay a popup iframe connection to the matching content script.
+     * @since 1.0.0
+     * @param {Port} port - The popup runtime port.
+     * @returns {void}
+     */
+    async #bridgePopup(port) {
+        const token = port.name.replace(/^popup-bridge:/u, "");
+        const tabId = port.sender?.tab?.id;
+        const tabURL = port.sender?.tab?.url;
+
+        if (!tabId) {
+            port.postMessage({ action: "error", error: "Unable to determine the current tab." });
+            port.disconnect();
+            return;
+        }
+
+        const tabPort = chrome.tabs.connect(tabId, { name: token });
+        let disconnected = false;
+        const disconnect = () => {
+            if (disconnected) return;
+            disconnected = true;
+            port.disconnect();
+            tabPort.disconnect();
+        };
+
+        port.postMessage({ action: "tab-context", tab: { id: tabId, url: tabURL } });
+
+        port.onMessage.addListener((message) => tabPort.postMessage(message));
+        port.onDisconnect.addListener(disconnect);
+        tabPort.onMessage.addListener((message) => port.postMessage(message));
+        tabPort.onDisconnect.addListener(() => {
+            chrome.runtime.lastError; // suppress content script connect errors
+            disconnect();
         });
     }
 
