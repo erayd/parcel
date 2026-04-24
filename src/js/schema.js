@@ -167,7 +167,6 @@ export const ConfigSchema = {
         },
         additionalSelectors: SelectorSchema,
         fillRelated: { type: "boolean", required: true, default: true },
-        autoSubmit: { type: "boolean", required: true, default: false },
         rules: {
             type: "array",
             minItems: 1,

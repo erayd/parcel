@@ -312,19 +312,7 @@
                     if (form) {
                         for (let target of submitTargets) {
                             let submitButton = form.querySelector(target.selector);
-                            if (submitButton) {
-                                if ((await config)?.autoSubmit) {
-                                    submitButton.click();
-                                } else {
-                                    submitButton.focus();
-                                }
-                                break;
-                            }
-                        }
-                    } else if ((await config)?.autoSubmit) {
-                        el.focus();
-                        for (ev in ["keydown", "keypress", "keyup"]) {
-                            el.dispatchEvent(new KeyboardEvent(ev, { bubbles: true, key: "Enter", code: "Enter", keyCode: 13 }));
+                            if (submitButton) submitButton.focus();
                         }
                     } else {
                         el.focus();
