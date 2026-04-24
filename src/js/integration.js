@@ -174,7 +174,6 @@
         popup.style.overflow = "hidden";
         popup.style.maxHeight = "400px";
         popup.style.minWidth = "200px";
-        popup.style.minHeight = "100px";
         popup.style.boxSizing = "content-box";
 
         const style = document.createElement("style");
