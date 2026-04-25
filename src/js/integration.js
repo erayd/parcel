@@ -107,6 +107,7 @@
      * @param {boolean} isRelated - Whether the field being filled is a related field (as opposed to the originally clicked field)
      */
     async function fillField(el, plaintext, config, type = null, fillValue = null, isRelated = false) {
+        if (!el.parentNode) throw new Error("Target element has been removed from the DOM.");
         const targetInfo = await getTargetInfo(el, isRelated);
         if (!type) type = targetInfo.type;
         if (fillValue === null) fillValue = await Helpers.getValue(plaintext, config, type);
