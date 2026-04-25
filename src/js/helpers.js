@@ -112,7 +112,11 @@ export class Helpers {
                 fillValue = plaintext;
             } else if (targetRule.onMissing === "fallback") {
                 if (!targetRule.fallback) throw new Error(`No fallback defined for field type: ${type}`);
-                return await Helpers.getValue(plaintext, config, targetRule.fallback);
+                let value = await Helpers.getValue(plaintext, config, targetRule.fallback);
+                if (!targetRule.fallbackMatch) return value;
+                let matches = value.match(new RegExp(targetRule.fallbackMatch, "ui"));
+                if (!matches) throw new Error(`Unable to extract fallback match for field type: ${type}`);
+                return matches[1];
             } else if (targetRule.onMissing === "null") {
                 throw new Error(`No value found for field type: ${type}`);
             }

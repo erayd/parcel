@@ -40,9 +40,10 @@
      * Get the target info for an element
      * @since 1.0.0
      * @param {HTMLElement} el - The element to check.
+     * @param {boolean} related - Whether to use selectors that are marked only for use with related fields
      * @returns {string|null} - The target type or null if not found.
      */
-    async function getTargetInfo(el) {
+    async function getTargetInfo(el, related = false) {
         try {
             if (el.hasAttribute("type") && !["text", "email", "tel", "password"].includes(el.type)) return null;
         } catch (err) {
@@ -50,14 +51,14 @@
             throw err;
         }
         let finalTarget = null;
-        for (let target of await validTargets) {
+        for (let target of (await validTargets).filter((t) => (related ? true : !t.relatedOnly))) {
             if (el.matches(target.selector) && !el.readOnly && !el.disabled) {
                 finalTarget = target;
                 break;
             }
         }
         if (finalTarget) {
-            for (let target of await invalidTargets) {
+            for (let target of (await invalidTargets).filter((t) => (related ? true : !t.relatedOnly))) {
                 if (el.matches(target.selector)) {
                     finalTarget = null;
                     el.setAttribute("parcel-blacklist", target.selector);
@@ -80,13 +81,13 @@
         const form = el.closest("form");
         if (!form) return [];
         const relatedFields = [];
-        for (let target of await validTargets) {
+        for (let target of (await validTargets).filter((t) => targetInfo.related.includes(t.type))) {
             for (const field of form.querySelectorAll(target.selector)) {
                 if (relatedFields.includes(field) || field === el) continue;
                 for (let target of await invalidTargets) {
                     if (field.matches(target.selector)) return;
                 }
-                if (!field.targetInfo) field.targetInfo = await getTargetInfo(field);
+                if (!field.targetInfo) field.targetInfo = await getTargetInfo(field, true);
                 if (field.targetInfo && targetInfo.related.includes(field.targetInfo?.type)) relatedFields.push(field);
             }
         }
@@ -101,46 +102,83 @@
      * @param {object} config - The current parcel config
      * @param {string|null} type - The target type to use, or null to infer from the element
      * @param {string|null} fillValue - The value to fill, or null to derive from the plaintext and config
+     * @param {boolean} isRelated - Whether the field being filled is a related field (as opposed to the originally clicked field)
      */
-    async function fillField(el, plaintext, config, type = null, fillValue = null) {
-        const targetInfo = await getTargetInfo(el);
+    async function fillField(el, plaintext, config, type = null, fillValue = null, isRelated = false) {
+        const targetInfo = await getTargetInfo(el, isRelated);
         if (!type) type = targetInfo.type;
         if (fillValue === null) fillValue = await Helpers.getValue(plaintext, config, type);
         if (typeof fillValue === "object" && fillValue.hasOwnProperty("value")) fillValue = fillValue.value;
 
-        /** Robust value-setting logic below is largely copied from Browserpass - thanks to all who helped develop it! */
-        {
-            // Send some keyboard events indicating that value modification has started (no associated keycode)
-            for (let eventName of ["keydown", "keypress", "keyup", "input", "change"]) {
-                el.dispatchEvent(new Event(eventName, { bubbles: true }));
-            }
+        // Send some keyboard events indicating that value modification has started (no associated keycode)
+        for (let eventName of ["keydown", "keypress", "keyup", "input", "change"]) {
+            el.dispatchEvent(new Event(eventName, { bubbles: true }));
+        }
 
-            // truncate the value if required by the field
-            if (el.maxLength > 0) {
-                fillValue = fillValue.substr(0, el.maxLength);
-            }
+        // truncate the value if required by the field
+        if (el.maxLength > 0) {
+            fillValue = fillValue.substr(0, el.maxLength);
+        }
 
-            // Set the field value
-            let initialValue = el.value || el.getAttribute("value");
+        // Handle select fields for which the direct value set failed
+        if (el.tagName === "SELECT") {
+            let optionToSelect = Array.from(el.options).find((o) => o.value === fillValue || o.text === fillValue);
+            if (!optionToSelect && type === "cardexp-year") {
+                let fullYear = (2000 + parseInt(fillValue)).toString();
+                optionToSelect = Array.from(el.options).find((o) => o.value === fullYear || o.text === fullYear);
+            }
+            if (!optionToSelect && type === "cardexp-month") {
+                let monthShortNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+                let monthLongNames = [
+                    "january",
+                    "february",
+                    "march",
+                    "april",
+                    "may",
+                    "june",
+                    "july",
+                    "august",
+                    "september",
+                    "october",
+                    "november",
+                    "december",
+                ];
+                let monthIndex = parseInt(fillValue) - 1;
+                optionToSelect = Array.from(el.options).find(
+                    (o) =>
+                        o.value === fillValue.padStart(2, "0") ||
+                        o.text === fillValue.padStart(2, "0") ||
+                        o.value === parseInt(fillValue).toString() ||
+                        o.text === parseInt(fillValue).toString() ||
+                        o.value === monthShortNames[monthIndex] ||
+                        o.text.toLowerCase() === monthShortNames[monthIndex] ||
+                        o.value === monthLongNames[monthIndex] ||
+                        o.text.toLowerCase() === monthLongNames[monthIndex],
+                );
+            }
+            if (optionToSelect) optionToSelect.selected = true;
+        } else {
+            // Set the field value directly
+            var initialValue = el.value || el.getAttribute("value");
             el.setAttribute("value", fillValue);
             el.value = fillValue;
-
-            // Send the keyboard events again indicating that value modification has finished (no associated keycode)
-            for (let eventName of ["keydown", "keypress", "keyup", "input", "change"]) {
-                el.dispatchEvent(new Event(eventName, { bubbles: true }));
-            }
-
-            // re-set value if unchanged after firing post-fill events
-            // (in case of sabotage by the site's own event handlers)
-            if ((el.value || el.getAttribute("value")) === initialValue) {
-                await new Promise((resolve) => setTimeout(resolve, 10)); // brief wait to yield execution to the page
-                el.setAttribute("value", fillValue);
-                el.value = fillValue;
-            }
-
-            // Finally unfocus the element
-            el.dispatchEvent(new Event("blur", { bubbles: true }));
         }
+
+        // Send the keyboard events again indicating that value modification has finished (no associated keycode)
+        for (let eventName of ["keydown", "keypress", "keyup", "input", "change"]) {
+            el.dispatchEvent(new Event(eventName, { bubbles: true }));
+        }
+
+        // re-set value if unchanged after firing post-fill events
+        // (in case of sabotage by the site's own event handlers)
+        if ((el.value || el.getAttribute("value")) === initialValue) {
+            await new Promise((resolve) => setTimeout(resolve, 10)); // brief wait to yield execution to the page
+            el.setAttribute("value", fillValue);
+            el.value = fillValue;
+        }
+
+        // Finally unfocus the element
+        el.dispatchEvent(new Event("blur", { bubbles: true }));
 
         el.style.outline = "2px solid green";
     }
@@ -252,12 +290,14 @@
             if (window === window.top && port.name === "broadcast") {
                 // Handle broadcast connections in the root frame only
                 // Look for a suitable target element in the root frame
-                const selectors = (await validTargets).toSorted((a, b) => {
-                    const priority = ["totp", "login", "secret"]; // target type search order, highest priority last
-                    if (priority.indexOf(a.type) > priority.indexOf(b.type)) return -1;
-                    if (priority.indexOf(a.type) < priority.indexOf(b.type)) return 1;
-                    return 0;
-                });
+                const selectors = (await validTargets)
+                    .toSorted((a, b) => {
+                        const priority = ["totp", "login", "secret", "cardholder"]; // target type search order, highest priority last
+                        if (priority.indexOf(a.type) > priority.indexOf(b.type)) return -1;
+                        if (priority.indexOf(a.type) < priority.indexOf(b.type)) return 1;
+                        return 0;
+                    })
+                    .filter((t) => (t.relatedOnly = false));
                 for (let selector of selectors) {
                     //el = document.querySelector(selector.selector);
                     el = Helpers.shadowSelector(selector.selector);
@@ -304,7 +344,7 @@
                     if (msg.config.fillRelated) {
                         for (const rel of await getRelatedFields(el)) {
                             try {
-                                await fillField(rel, msg.plaintext, msg.config);
+                                await fillField(rel, msg.plaintext, msg.config, null, null, true);
                             } catch (err) {
                                 // ignore errors when filling related form fields
                             }
