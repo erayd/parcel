@@ -104,6 +104,8 @@ export class Helpers {
         if (!fillValue) {
             if (targetRule.onMissing === "top") {
                 fillValue = plaintextLines[0];
+            } else if (targetRule.onMissing === "naked-top" && !plaintextLines[0].match(/^[a-z0-9_\-]+:\s+/iu)) {
+                fillValue = plaintextLines[0];
             } else if (targetRule.onMissing === "ntop") {
                 fillValue = plaintext.match(/(?<=\r\n|\n|\r).+/isu)?.[0];
             } else if (targetRule.onMissing === "all") {
