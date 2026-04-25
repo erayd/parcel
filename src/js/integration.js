@@ -2,6 +2,7 @@
 
 (async () => {
     const Helpers = (await import(chrome.runtime.getURL("/js/helpers.js"))).Helpers;
+    const { Schema, SelectorSchema } = await import(chrome.runtime.getURL("/js/schema.js"));
     const targetSelectors = import(chrome.runtime.getURL("/js/selectors.js"));
 
     /**
@@ -25,6 +26,7 @@
      */
     const validTargets = targetSelectors.then(async (targetSelectors) => {
         let selectors = targetSelectors.targetSelectors.concat((await config).additionalSelectors || []);
+        Schema.validate(SelectorSchema, selectors);
         return selectors.filter((t) => t.type !== "blacklist" && (!t.host || t.host.includes(window.location.hostname)));
     });
 
@@ -297,7 +299,7 @@
                         if (priority.indexOf(a.type) < priority.indexOf(b.type)) return 1;
                         return 0;
                     })
-                    .filter((t) => (t.relatedOnly = false));
+                    .filter((t) => !t.relatedOnly);
                 for (let selector of selectors) {
                     el = Helpers.shadowSelector(selector.selector);
                     if (el) {
