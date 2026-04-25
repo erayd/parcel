@@ -45,6 +45,7 @@ export var targetSelectors = [
     { selector: "form[class*=login i] input[name=name i]", type: "login" }, // nz-cms.nz
     { selector: "#login input#name, #login input.name, #login input[name*=name i]", type: "login" }, // Mikrotik + various
     { selector: "form[action*=login i] input[name=name i]", type: "login" }, // Supermicro IPMI
+    { selector: "select[name=user_level i]", type: "login", relatedOnly: true }, // IBM TS3100
 
     // type: submit
     { selector: "input[type=submit i]", type: "submit" },
