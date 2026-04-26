@@ -14,6 +14,7 @@ new (class Agent extends EventTarget {
     #entriesUpdated = 0;
     #initError;
     #currentNativeCall = null;
+    #authorisedTokens = new Set();
 
     /** @since 1.0.0 */
     constructor() {
@@ -232,10 +233,18 @@ new (class Agent extends EventTarget {
      * @returns {void}
      */
     async #connect(port) {
+        var authorised = false;
+
         if (port.name?.startsWith("popup-bridge:")) {
             await this.#bridgePopup(port);
             return;
         }
+
+        if (port.name === "auth") {
+            port.onMessage.addListener((token) => this.#authorisedTokens.add(token));
+            return;
+        }
+
         const updateStatus = (s) => port.postMessage({ action: "status", status: s });
         const clearStatus = () => port.postMessage({ action: "clear-status" });
         clearStatus();
@@ -243,6 +252,15 @@ new (class Agent extends EventTarget {
         // listen for messages
         port.onMessage.addListener(async (message) => {
             try {
+                if (port.name === "popup") {
+                    if (message?.action === "auth" && (this.#authorisedTokens.has(message.token) || message.token === "broadcast")) {
+                        if (message.token !== "broadcast") this.#authorisedTokens.delete(message.token);
+                        authorised = true;
+                        return;
+                    }
+                    if (!authorised) throw new Error("Unauthorised port");
+                }
+
                 if (!this.#connectedNative) throw new Error("Not connected to native host");
                 updateStatus("Waiting for native host startup...");
                 await this.#waitUntilReady();

@@ -60,6 +60,7 @@
         tabPort.disconnected = true;
     });
     const port = chrome.runtime.connect({ name: "popup" });
+    port.postMessage({ action: "auth", token });
     const ul = document.querySelector("ul");
     let limit = true;
     let history = [];

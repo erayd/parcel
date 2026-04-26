@@ -4,13 +4,15 @@
     const Helpers = (await import(chrome.runtime.getURL("/js/helpers.js"))).Helpers;
     const { Schema, SelectorSchema } = await import(chrome.runtime.getURL("/js/schema.js"));
     const targetSelectors = import(chrome.runtime.getURL("/js/selectors.js"));
+    const targetBindings = {};
+    const authPort = chrome.runtime.connect({ name: "auth" });
 
     /**
      * Configuration object
      * @since 1.0.0
      */
     const config = new Promise((resolve) => {
-        const port = chrome.runtime.connect({ name: "config" });
+        const port = chrome.runtime.connect({ name: "integration" });
         port.onMessage.addListener(async (msg) => {
             if (msg.action === "config") {
                 port.disconnect();
@@ -208,7 +210,6 @@
             "color-scheme: initial; forced-color-adjust: initial; mask: initial; math-depth: initial; position: fixed; position-anchor: initial; text-size-adjust: initial; appearance: initial; color: initial; font: initial; font-palette: initial; font-synthesis: initial; position-area: initial; text-orientation: initial; text-rendering: initial; text-spacing-trim: initial; -webkit-font-smoothing: initial; -webkit-locale: initial; -webkit-text-orientation: initial; -webkit-writing-mode: initial; writing-mode: initial; zoom: initial; accent-color: initial; place-content: initial; place-items: initial; place-self: initial; alignment-baseline: initial; anchor-name: initial; anchor-scope: initial; animation-composition: initial; animation: initial; app-region: initial; aspect-ratio: initial; backdrop-filter: initial; backface-visibility: initial; background: initial; background-blend-mode: initial; baseline-shift: initial; baseline-source: initial; block-size: initial; border-block: initial; border: none; border-radius: initial; border-collapse: initial; border-end-end-radius: initial; border-end-start-radius: initial; border-inline: initial; border-start-end-radius: initial; border-start-start-radius: initial; bottom: initial; box-decoration-break: initial; box-shadow: rgba(0, 0, 0, 0.1) 0px 0px 0px 1px, rgba(0, 0, 0, 0.1) 0px 4px 20px; box-sizing: initial; break-after: initial; break-before: initial; break-inside: initial; buffered-rendering: initial; caption-side: initial; caret-color: initial; clear: initial; clip: initial; clip-path: initial; clip-rule: initial; color-interpolation: initial; color-interpolation-filters: initial; color-rendering: initial; columns: initial; column-fill: initial; gap: initial; column-rule: initial; column-span: initial; contain: initial; contain-intrinsic-block-size: initial; contain-intrinsic-size: initial; contain-intrinsic-inline-size: initial; container: initial; content: initial; content-visibility: initial; counter-increment: initial; counter-reset: initial; counter-set: initial; cursor: initial; cx: initial; cy: initial; d: initial; display: initial; dominant-baseline: initial; empty-cells: initial; field-sizing: initial; fill: initial; fill-opacity: initial; fill-rule: initial; filter: initial; flex: initial; flex-flow: initial; float: initial; flood-color: initial; flood-opacity: initial; grid: initial; grid-area: initial; height: initial; hyphenate-character: initial; hyphenate-limit-chars: initial; hyphens: initial; image-orientation: initial; image-rendering: initial; initial-letter: initial; inline-size: initial; inset-block: initial; inset-inline: initial; interpolate-size: initial; isolation: initial; left: initial; letter-spacing: initial; lighting-color: initial; line-break: initial; list-style: initial; margin-block: initial; margin: initial; margin-inline: initial; marker: initial; mask-type: initial; math-shift: initial; math-style: initial; max-block-size: initial; max-height: initial; max-inline-size: initial; max-width: initial; min-block-size: initial; min-height: initial; min-inline-size: initial; min-width: initial; mix-blend-mode: initial; object-fit: initial; object-position: initial; object-view-box: initial; offset: initial; opacity: initial; order: initial; orphans: initial; outline: 0px; outline-offset: initial; overflow-anchor: initial; overflow-block: initial; overflow-clip-margin: initial; overflow-inline: initial; overflow-wrap: initial; overflow: initial; overlay: initial; overscroll-behavior-block: initial; overscroll-behavior-inline: initial; overscroll-behavior: initial; padding-block: initial; padding: initial; padding-inline: initial; page: initial; page-orientation: initial; paint-order: initial; perspective: initial; perspective-origin: initial; pointer-events: initial; position-try: initial; position-visibility: initial; quotes: initial; r: initial; resize: initial; right: initial; rotate: initial; ruby-align: initial; ruby-position: initial; rx: initial; ry: initial; scale: initial; scroll-behavior: initial; scroll-initial-target: initial; scroll-margin-block: initial; scroll-margin: initial; scroll-margin-inline: initial; scroll-marker-group: initial; scroll-padding-block: initial; scroll-padding: initial; scroll-padding-inline: initial; scroll-snap-align: initial; scroll-snap-stop: initial; scroll-snap-type: initial; scroll-timeline: initial; scrollbar-color: initial; scrollbar-gutter: initial; scrollbar-width: initial; shape-image-threshold: initial; shape-margin: initial; shape-outside: initial; shape-rendering: initial; size: initial; speak: initial; stop-color: initial; stop-opacity: initial; stroke: initial; stroke-dasharray: initial; stroke-dashoffset: initial; stroke-linecap: initial; stroke-linejoin: initial; stroke-miterlimit: initial; stroke-opacity: initial; stroke-width: initial; tab-size: initial; table-layout: initial; text-align: initial; text-align-last: initial; text-anchor: initial; text-box: initial; text-combine-upright: initial; text-decoration: initial; text-decoration-skip-ink: initial; text-emphasis: initial; text-emphasis-position: initial; text-indent: initial; text-overflow: initial; text-shadow: initial; text-transform: initial; text-underline-offset: initial; text-underline-position: initial; text-wrap: initial; timeline-scope: initial; top: initial; touch-action: initial; transform: initial; transform-box: initial; transform-origin: initial; transform-style: initial; transition: initial; translate: initial; user-select: initial; vector-effect: initial; vertical-align: initial; view-timeline: initial; view-transition-class: initial; view-transition-name: initial; visibility: visible; border-spacing: initial; -webkit-box-align: initial; -webkit-box-decoration-break: initial; -webkit-box-direction: initial; -webkit-box-flex: initial; -webkit-box-ordinal-group: initial; -webkit-box-orient: initial; -webkit-box-pack: initial; -webkit-box-reflect: initial; -webkit-line-break: initial; -webkit-line-clamp: initial; -webkit-mask-box-image: initial; -webkit-print-color-adjust: initial; -webkit-rtl-ordering: initial; -webkit-ruby-position: initial; -webkit-tap-highlight-color: initial; -webkit-text-combine: initial; -webkit-text-decorations-in-effect: initial; -webkit-text-fill-color: initial; -webkit-text-security: initial; -webkit-text-stroke: initial; -webkit-user-drag: initial; white-space-collapse: initial; widows: initial; width: initial; will-change: initial; word-break: initial; word-spacing: initial; x: initial; y: initial; z-index: 2147483647;",
         );
         popup.classList.add("parcel-popup");
-        popup.classList.add(`parcel-popup-${token}`);
         const root = popup.attachShadow({ mode: "closed" });
         popup.style.position = "absolute";
         popup.style.top = `${el.getBoundingClientRect().bottom + 5}px`;
@@ -239,7 +240,7 @@
 
         // attach iframe
         const frame = document.createElement("iframe");
-        frame.src = chrome.runtime.getURL(`/html/popup.html?token=${el._parcelToken}`);
+        frame.src = chrome.runtime.getURL(`/html/popup.html?token=${token}`);
         root.appendChild(frame);
 
         document.body.appendChild(popup);
@@ -256,19 +257,18 @@
         let popup = document.querySelector(".parcel-popup");
         let targetInfo = await getTargetInfo(target);
         if (targetInfo) {
-            if (!target._parcelToken || target._parcelToken === "broadcast") {
-                try {
-                    target._parcelToken = crypto.randomUUID();
-                } catch (err) {
-                    // fallback for browsers without crypto.randomUUID(), typically insecure pages lacking the crypto API
-                    target._parcelToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
-                }
+            try {
+                target._parcelToken = crypto.randomUUID();
+            } catch (err) {
+                // fallback for browsers without crypto.randomUUID(), typically insecure pages lacking the crypto API
+                target._parcelToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
             }
+            targetBindings[target._parcelToken] = target;
+            authPort.postMessage(target._parcelToken);
             if (popup) {
                 popup.remove();
-                if (popup.classList.contains(`parcel-popup-${target._parcelToken}`)) return; // Don't reopen the popup if we just clicked its target field to close it
+                if (target === popup._parcelTarget) return; // Don't reopen the popup if we just clicked its target field to close it
             }
-            target.classList.add(`parcel-target-${target._parcelToken}`);
             target.setAttribute("parcel-selector", targetInfo.selector);
             target.setAttribute("parcel-type", targetInfo.type);
             triggerPopup(target, targetInfo.class, target._parcelToken);
@@ -291,9 +291,15 @@
      */
     chrome.runtime.onConnect.addListener(async (port) => {
         if (!port.name) return;
+        if (!targetBindings.hasOwnProperty(port.name) && port.name !== "broadcast") {
+            port.postMessage({ action: "close" });
+            port.disconnect();
+            return;
+        }
+        port.onDisconnect.addListener(() => delete targetBindings[port.name]);
         const updateStatus = (status) => port.postMessage({ action: "status", status });
         const clearStatus = () => port.postMessage({ action: "clear-status" });
-        let el = Helpers.shadowSelector(`.parcel-target-${port.name}`);
+        let el = targetBindings[port.name];
         if (!el) {
             if (window === window.top && port.name === "broadcast") {
                 // Handle broadcast connections in the root frame only
@@ -310,7 +316,6 @@
                     el = Helpers.shadowSelector(selector.selector);
                     if (el) {
                         el._parcelToken = port.name;
-                        el.classList.add(`parcel-target-${port.name}`);
                         break;
                     }
                 }
@@ -320,6 +325,7 @@
                     return;
                 }
             } else {
+                throw new Error("Element binding is missing.");
                 return;
             }
         }
@@ -340,7 +346,7 @@
                 updateStatus("Filling value...");
                 await fillField(el, null, null, null, msg.value);
                 port.postMessage({ action: "close" });
-                document.querySelector(`.parcel-popup-${port.name}`)?.remove();
+                el._parcelPopup?.remove();
             } else if (msg?.action === "fill") {
                 // fill the target field, and related fields if configured
                 try {
@@ -358,7 +364,7 @@
                         }
                     }
                     port.postMessage({ action: "close" });
-                    document.querySelector(`.parcel-popup-${port.name}`)?.remove();
+                    el._parcelPopup?.remove();
 
                     // submit the form if configured, else try to focus the submit button
                     const submitTargets = (await validTargets).filter((t) => t.type === "submit");
@@ -375,13 +381,13 @@
                     port.postMessage({ action: "error", error: err.message });
                 }
             } else if (msg?.action === "resize") {
-                const popup = document.querySelector(`.parcel-popup-${port.name}`);
+                const popup = el._parcelPopup;
                 if (popup) {
                     popup.style.height = `${msg.height}px`;
                     popup.style.width = `${msg.width}px`;
                 }
             } else if (msg?.action === "close") {
-                let popup = Helpers.shadowSelector(`.parcel-popup-${port.name}`);
+                let popup = el._parcelPopup;
                 if (popup) {
                     popup.remove();
                     popup._parcelTarget?.focus();
