@@ -1,5 +1,7 @@
 "use strict";
 
+import { defaultTargets } from "./targets.js";
+
 /**
  * A basic data validation class.
  * @since 1.0.0
@@ -112,6 +114,34 @@ export const SelectorSchema = {
 };
 
 /**
+ * The schema for targets.
+ * @since 1.0.0
+ */
+export const TargetSchema = {
+    type: "object",
+    properties: {
+        class: { type: "string", required: true, enum: ["login"], default: "login" },
+        dynamic: { type: "boolean", required: true, default: false },
+        fallback: { type: "string", minLength: 1 },
+        fallbackMatch: { type: "string", format: "regex", minLength: 1 },
+        hoist: { type: "boolean", required: true, default: false },
+        label: { type: "string" },
+        name: { type: "string", required: true },
+        onMissing: {
+            type: "string",
+            required: true,
+            enum: ["top", "naked-top", "ntop", "all", "null", "fallback"],
+            default: "null",
+        },
+        pattern: { type: "string", required: true, format: "regex", minLength: 1 },
+        related: { type: "array", required: true, items: { type: "string" }, default: [] },
+        strip: { type: "boolean", required: true, default: true },
+        transform: { type: "array", items: { type: "string", enum: ["totp", "totp-url"] }, required: true, default: [] },
+        trim: { type: "boolean", required: true, default: true },
+    },
+};
+
+/**
  * The main configuration schema.
  * @since 1.0.0
  */
@@ -119,6 +149,7 @@ export const ConfigSchema = {
     type: "object",
     properties: {
         additionalSelectors: SelectorSchema,
+        additionalTargets: { type: "array", items: TargetSchema },
         cacheTTL: { type: "number", required: true, minimum: 0, default: 300 },
         cacheTTLInteractive: { type: "number", required: true, minimum: 0, default: 10 },
         decryptTimeout: { type: "number", required: true, minimum: 1, default: 60 },
@@ -144,104 +175,9 @@ export const ConfigSchema = {
         },
         targets: {
             type: "array",
-            items: {
-                type: "object",
-                properties: {
-                    class: { type: "string", required: true, enum: ["login"], default: "login" },
-                    dynamic: { type: "boolean", required: true, default: false },
-                    fallback: { type: "string", minLength: 1 },
-                    fallbackMatch: { type: "string", format: "regex", minLength: 1 },
-                    hoist: { type: "boolean", required: true, default: false },
-                    label: { type: "string" },
-                    name: { type: "string", required: true },
-                    onMissing: {
-                        type: "string",
-                        required: true,
-                        enum: ["top", "naked-top", "ntop", "all", "null", "fallback"],
-                        default: "null",
-                    },
-                    pattern: { type: "string", required: true, format: "regex", minLength: 1 },
-                    related: { type: "array", required: true, items: { type: "string" }, default: [] },
-                    strip: { type: "boolean", required: true, default: true },
-                    transform: { type: "array", items: { type: "string", enum: ["totp", "totp-url"] }, required: true, default: [] },
-                    trim: { type: "boolean", required: true, default: true },
-                },
-            },
+            items: TargetSchema,
             required: true,
-            default: [
-                {
-                    name: "secret",
-                    label: "Secret",
-                    hoist: true,
-                    pattern: "^(secret|password):",
-                    onMissing: "naked-top",
-                    related: ["login", "totp"],
-                },
-                { name: "login", label: "Login", hoist: true, pattern: "^(user|username|login|email):", related: ["secret", "totp"] },
-                {
-                    name: "totp",
-                    label: "TOTP",
-                    dynamic: true,
-                    fallback: "totp-url",
-                    hoist: true,
-                    onMissing: "fallback",
-                    pattern: "^(otc|otp|totp|2fa|authenticator|(?:two|2)[_\-]factor):(?!.*otpauth://)",
-                    related: ["login", "secret"],
-                    transform: ["totp"],
-                },
-                {
-                    name: "totp-url",
-                    fallback: "totp-url-raw",
-                    onMissing: "fallback",
-                    pattern: "^(otc|otp|totp|2fa|authenticator|(?:two|2)[_\-]factor):",
-                    transform: ["totp-url"],
-                },
-                { name: "totp-url-raw", pattern: "^otpauth://totp/.*", strip: false, transform: ["totp-url"] },
-                {
-                    name: "card",
-                    label: "Card",
-                    hoist: true,
-                    pattern: "^(card|card-number|ccn|credit-?card|debit-?card|card-?num):",
-                    related: ["cardholder", "cardexp", "cardexp-month", "cardexp-year", "cardcsc"],
-                },
-                {
-                    name: "cardholder",
-                    label: "Name",
-                    hoist: true,
-                    pattern: "^((cc-?)?name|(card-?)?holder):",
-                    related: ["card", "cardexp", "cardexp-month", "cardexp-year", "cardcsc"],
-                },
-                {
-                    name: "cardexp",
-                    label: "Expiry",
-                    hoist: true,
-                    pattern: "^((cc|card)[_-]?)?(exp(iry)?):",
-                    related: ["card", "cardholder", "cardcsc"],
-                },
-                {
-                    name: "cardexp-month",
-                    fallback: "cardexp",
-                    fallbackMatch: "^([0-9]{1,2})",
-                    onMissing: "fallback",
-                    pattern: "^((cc|card)[_-]?)?exp(iry)?[-_]?mon(th)?:",
-                    related: ["card", "cardholder", "cardexp-year", "cardcsc"],
-                },
-                {
-                    name: "cardexp-year",
-                    fallback: "cardexp",
-                    fallbackMatch: "/([0-9]{1,2})",
-                    onMissing: "fallback",
-                    pattern: "^((cc|card)[_-]?)?exp(iry)?[-_]?(year|yr):",
-                    related: ["card", "cardholder", "cardexp-month", "cardcsc"],
-                },
-                {
-                    name: "cardcsc",
-                    label: "CSC",
-                    hoist: true,
-                    pattern: "^((card|cc)[_-]?)?(csc|cvv|cvc):",
-                    related: ["card", "cardholder", "cardexp", "cardexp-month", "cardexp-year"],
-                },
-            ],
+            default: defaultTargets,
         },
     },
 };

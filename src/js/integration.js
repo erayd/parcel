@@ -69,7 +69,11 @@
                     break;
                 }
             }
-            finalTarget.related = (await config).targets.find((t) => t.name === finalTarget.type)?.related || [];
+            if (finalTarget) {
+                finalTarget.related =
+                    (await config).targets.concat((await config).additionalTargets || []).find((t) => t.name === finalTarget.type)
+                        ?.related || [];
+            }
         }
         return finalTarget;
     }

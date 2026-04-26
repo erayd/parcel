@@ -24,6 +24,7 @@ DIST_FILES := \
     js/schema.js \
     js/selectors.js \
     js/shadow.js \
+    js/targets.js \
 
 .PHONY: default
 default: prettier dist

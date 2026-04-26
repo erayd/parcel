@@ -36,7 +36,8 @@
                 "js/integration.js",
                 "js/popup.js",
                 "js/schema.js",
-                "js/selectors.js"
+                "js/selectors.js",
+                "js/targets.js"
             ],
             "matches": ["<all_urls>"]
         }

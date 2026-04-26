@@ -226,7 +226,7 @@
             this.#plaintext = plaintext;
             let config = await this.#plaintext.getConfig();
 
-            for (let target of config.targets) {
+            for (let target of config.targets.concat(config.additionalTargets || [])) {
                 if (!target.hoist) continue;
                 let value = await this.#plaintext.getValue(target.name);
                 if (value === null) continue;

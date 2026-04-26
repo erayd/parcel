@@ -85,7 +85,7 @@ export class Helpers {
      */
     static async getValue(plaintext, config, type) {
         config = await config;
-        const targetRule = config.targets.reduce((acc, rule) => {
+        const targetRule = config.targets.concat(config.additionalTargets || []).reduce((acc, rule) => {
             if (rule.name === type) {
                 acc = rule;
             }
