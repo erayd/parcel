@@ -187,7 +187,7 @@ if ! gpg --version &> /dev/null; then
 fi
 
 # tell the extension that we are ready for bootstrapping
-parcel_send '{"action": "bootstrap"}'
+parcel_send "$(jq -n --arg version "$BOOTSTRAP_VERSION" '{action: "bootstrap", version: $version}')"
 
 # run main event loop
 while true; do
