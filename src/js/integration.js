@@ -339,7 +339,7 @@
         }
         const targetInfo = await getTargetInfo(el);
         if (!targetInfo) {
-            port.postMessage({ action: "error", error: "Invalid fill target." });
+            port.postMessage({ action: "error", error: "Cannot find a suitable autofill target." });
             port.disconnect();
             return;
         }
