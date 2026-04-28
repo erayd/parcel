@@ -383,6 +383,7 @@
                         el.focus();
                     }
                 } catch (err) {
+                    console.warn(err);
                     port.postMessage({ action: "error", error: err.message });
                 }
             } else if (msg?.action === "resize") {
