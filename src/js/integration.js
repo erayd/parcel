@@ -94,9 +94,14 @@
         for (let target of (await validTargets).filter((t) => targetInfo.related.includes(t.type))) {
             for (const field of form.querySelectorAll(target.selector)) {
                 if (relatedFields.includes(field) || field === el) continue;
+                let isInvalid = false;
                 for (let target of await invalidTargets) {
-                    if (field.matches(target.selector)) return;
+                    if (field.matches(target.selector)) {
+                        isInvalid = true;
+                        break;
+                    }
                 }
+                if (isInvalid) continue;
                 if (!field.targetInfo) field.targetInfo = await getTargetInfo(field, true);
                 if (field.targetInfo && targetInfo.related.includes(field.targetInfo?.type)) relatedFields.push(field);
             }
