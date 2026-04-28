@@ -292,7 +292,9 @@ new (class Agent extends EventTarget {
                         this.#setEntries(await this.#callNative("list"));
                     }
                     clearStatus();
-                    port.postMessage({ action: "config", config: this.#config });
+                    let response = { action: "config", config: this.#config };
+                    if (port.name === "integration") response.frameId = port.sender?.frameId || 0;
+                    port.postMessage(response);
                 }
             } catch (err) {
                 console.error(err);
@@ -308,7 +310,9 @@ new (class Agent extends EventTarget {
      * @returns {void}
      */
     async #bridgePopup(port) {
-        const token = port.name.replace(/^popup-bridge:/u, "");
+        const matches = port.name.match(/^popup-bridge:(.+?):(\d+)$/u);
+        const token = matches?.[1];
+        const frameId = parseInt(matches?.[2], 10) || 0;
         const tabId = port.sender?.tab?.id;
         const tabURL = port.sender?.tab?.url;
 
@@ -318,7 +322,7 @@ new (class Agent extends EventTarget {
             return;
         }
 
-        const tabPort = chrome.tabs.connect(tabId, { name: token });
+        const tabPort = chrome.tabs.connect(tabId, { name: token, frameId });
         let disconnected = false;
         const disconnect = () => {
             if (disconnected) return;

@@ -6,6 +6,7 @@
     const targetSelectors = import(chrome.runtime.getURL("/js/selectors.js"));
     const targetBindings = {};
     const authPort = chrome.runtime.connect({ name: "auth" });
+    var frameId = 0;
 
     /**
      * Configuration object
@@ -16,6 +17,7 @@
         port.onMessage.addListener(async (msg) => {
             if (msg.action === "config") {
                 port.disconnect();
+                frameId = msg?.frameId || 0;
                 resolve(msg.config);
             }
         });
@@ -243,7 +245,7 @@
 
         // attach iframe
         const frame = document.createElement("iframe");
-        frame.src = chrome.runtime.getURL(`/html/popup.html?token=${token}`);
+        frame.src = chrome.runtime.getURL(`/html/popup.html?token=${token}&frameId=${frameId}`);
         root.appendChild(frame);
 
         document.body.appendChild(popup);

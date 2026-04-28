@@ -4,6 +4,7 @@
     const Helpers = (await import(chrome.runtime.getURL("/js/helpers.js"))).Helpers;
     const Plaintext = (await import(chrome.runtime.getURL("/js/plaintext.js"))).Plaintext;
     const token = new URLSearchParams(window.location.search).get("token") || "broadcast";
+    const frameId = parseInt(new URLSearchParams(window.location.search).get("frameId"), 10) || 0;
     if (token === "broadcast" && window !== window.top) {
         const msg =
             "Parcel may not be independently embedded in a frame. If you are seeing this message, it means that a website " +
@@ -25,10 +26,10 @@
         if (chrome.tabs?.getCurrent && chrome.tabs?.query && chrome.tabs?.connect) {
             const tab = (await chrome.tabs.getCurrent()) || (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
             tab.contextualIdentity = tab?.cookieStoreId;
-            return { tab, tabPort: chrome.tabs.connect(tab.id, { name: token }) };
+            return { tab, tabPort: chrome.tabs.connect(tab.id, { name: token, frameId }) };
         }
 
-        const tabPort = chrome.runtime.connect({ name: `popup-bridge:${token}` });
+        const tabPort = chrome.runtime.connect({ name: `popup-bridge:${token}:${frameId}` });
         const tab = await new Promise((resolve, reject) => {
             const onMessage = (msg) => {
                 if (msg?.action === "tab-context") {
