@@ -59,12 +59,12 @@ new (class Agent extends EventTarget {
         }
     }
 
-   /**
-    * Clear saved history for a removed contextual identity.
-    * @since 1.0.0
-    * @param {string} cookieStoreId - The cookie store ID of the removed contextual identity.
-    * @returns {void}
-    */
+    /**
+     * Clear saved history for a removed contextual identity.
+     * @since 1.0.0
+     * @param {string} cookieStoreId - The cookie store ID of the removed contextual identity.
+     * @returns {void}
+     */
     async #clearContainerHistory(cookieStoreId) {
         if (!cookieStoreId) return;
         try {
