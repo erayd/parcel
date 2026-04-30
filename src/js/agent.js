@@ -317,6 +317,10 @@ new (class Agent extends EventTarget {
                     let response = { action: "config", config: this.#config };
                     if (port.name === "integration") response.frameId = port.sender?.frameId || 0;
                     port.postMessage(response);
+                } else if (message?.action === "sha256") {
+                    // provide a SHA-256 hash of the given value
+                    const hash = await Helpers.sha256(message.value);
+                    port.postMessage({ action: "sha256-digest", value: message.value, hash });
                 }
             } catch (err) {
                 console.error(err);

@@ -66,6 +66,26 @@
     let limit = true;
     let history = [];
 
+    const sha256 = async (s) => {
+        try {
+            return await Helpers.sha256(s);
+        } catch (err) {
+            console.warn("Crypto API not available in this context, delegating hash to background worker.");
+            // If the crypto API isn't available in this context, hash via the background service
+            let digest = new Promise((resolve) => {
+                function shaListener(msg) {
+                    if (msg?.action === "sha256-digest" && msg.value === s) {
+                        port.onMessage.removeListener(shaListener);
+                        resolve(msg.hash);
+                    }
+                }
+                port.onMessage.addListener(shaListener);
+            });
+            port.postMessage({ action: "sha256", value: s });
+            return await digest;
+        }
+    };
+
     /**
      * Custom element for displaying a line of the plaintext in detail view
      * @since 1.0.0
@@ -289,8 +309,8 @@
 
     if (tab.url) {
         const url = new URL(tab.url);
-        const hash = await Helpers.sha256(url.origin);
-        const scope = await Helpers.sha256(tab.contextualIdentity ? tab.contextualIdentity : "default");
+        const hash = await sha256(url.origin);
+        const scope = await sha256(tab.contextualIdentity ? tab.contextualIdentity : "default");
         document.getElementById("origin").textContent = url.hostname;
         history = (await chrome.storage.local.get(`history:${scope}:${hash}`))?.[`history:${scope}:${hash}`] || [];
     } else {
@@ -414,10 +434,10 @@
                 li.appendChild(name);
 
                 const url = new URL(tab.url || "undefined-url://");
-                const hash = await Helpers.sha256(url.origin);
-                const scope = await Helpers.sha256(tab.contextualIdentity ? tab.contextualIdentity : "default");
+                const hash = await sha256(url.origin);
+                const scope = await sha256(tab.contextualIdentity ? tab.contextualIdentity : "default");
                 for (let he of history) {
-                    if (he.path === (await Helpers.sha256(entry.path))) {
+                    if (he.path === (await sha256(entry.path))) {
                         const historyButton = document.createElement("button");
                         historyButton.classList.add("historyNuke");
                         historyButton.textContent = "X";
@@ -458,10 +478,10 @@
 
                 li.addEventListener("click", async (ev) => {
                     port.postMessage({ action: "decrypt", intent: "fill", path: entry.path }); // MARK
-                    if (history?.[0]?.path === (await Helpers.sha256(entry.path))) {
+                    if (history?.[0]?.path === (await sha256(entry.path))) {
                         history[0].when = Date.now();
                     } else {
-                        history.unshift({ path: await Helpers.sha256(entry.path), when: Date.now() });
+                        history.unshift({ path: await sha256(entry.path), when: Date.now() });
                     }
                 });
 
@@ -472,8 +492,8 @@
                 tabPort.postMessage({ action: "fill", token, plaintext: msg.plaintext, config: await config });
                 if (tab.url) {
                     const url = new URL(tab.url);
-                    const hash = await Helpers.sha256(url.origin);
-                    const scope = await Helpers.sha256(tab.contextualIdentity ? tab.contextualIdentity : "default");
+                    const hash = await sha256(url.origin);
+                    const scope = await sha256(tab.contextualIdentity ? tab.contextualIdentity : "default");
                     chrome.storage.local.set({ [`history:${scope}:${hash}`]: history.slice(0, (await config).historyLength) });
                 }
             } else if (msg.intent === "detail") {

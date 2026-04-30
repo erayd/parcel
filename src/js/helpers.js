@@ -69,6 +69,7 @@ export class Helpers {
      * @returns {Promise<string>} The SHA-256 hash of the string.
      */
     static async sha256(s) {
+        if (!crypto.subtle) throw new Error("Crypto API is not available in this environment.");
         const data = new TextEncoder().encode(s);
         const hashBuffer = await crypto.subtle.digest("SHA-256", data);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
