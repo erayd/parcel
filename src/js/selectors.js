@@ -8,6 +8,7 @@ export var targetSelectors = [
     // type: blacklist
     { selector: "input[example=blacklist i]", type: "blacklist", host: ["example.com", "example.org"] },
     { selector: "input[autocomplete~=new-password i]", type: "blacklist" },
+    { selector: "input[type=search i]", type: "blacklist" },
 
     // type: secret
     { selector: "input[autocomplete~=current-password i]", type: "secret" },
