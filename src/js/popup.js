@@ -507,12 +507,17 @@
             document.querySelector("#status").textContent = "Error";
             const p = document.createElement("p");
             p.classList.add("error");
+            if (msg.hasOwnProperty("category")) p.classList.add(`error-category-${msg.category}`);
             p.textContent = msg.error;
             document.querySelectorAll("p.error").forEach((el) => el.remove());
             document.body.insertAdjacentElement("afterbegin", p);
             document.getElementById("modal-shade").classList.add("hidden");
             p.scrollIntoView({ behavior: "instant", block: "nearest" });
-            setTimeout(() => p.remove(), 5000);
+            setTimeout(() => p.remove(), 10000);
+        } else if (msg.action === "clear-errors") {
+            if (msg.hasOwnProperty("category"))
+                document.querySelectorAll(`p.error.error-category-${msg.category}`).forEach((el) => el.remove());
+            else document.querySelectorAll("p.error").forEach((el) => el.remove());
         }
     });
 

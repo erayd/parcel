@@ -280,6 +280,7 @@ new (class Agent extends EventTarget {
 
         const updateStatus = (s) => port.postMessage({ action: "status", status: s });
         const clearStatus = () => port.postMessage({ action: "clear-status" });
+        const clearErrors = (category = null) => port.postMessage({ action: "clear-errors", category });
         clearStatus();
 
         // listen for messages
@@ -333,9 +334,11 @@ new (class Agent extends EventTarget {
                     const hash = await Helpers.sha256(message.value);
                     port.postMessage({ action: "sha256-digest", value: message.value, hash });
                 }
+                if (message.hasOwnProperty("action")) clearErrors(message.action);
             } catch (err) {
-                console.error(err);
-                port.postMessage({ action: "error", error: err.message });
+                if (err.hasOwnProperty("logAs")) console[err.logAs](err);
+                else console.error(err);
+                port.postMessage({ action: "error", error: err.message, category: err.category || message?.action || "default" });
             }
         });
     }
@@ -448,6 +451,7 @@ new (class Agent extends EventTarget {
                     matches = matches.filter((entry) => p.test(entry.name));
                 } catch (err) {
                     console.warn(`Invalid search term: ${term}`);
+                    err.logAs = "info";
                     throw err;
                 }
             }
