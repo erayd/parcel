@@ -15,6 +15,7 @@ new (class Agent extends EventTarget {
     #initError;
     #currentNativeCall = null;
     #authorisedTokens = new Set();
+    #publicSuffixList = null;
 
     /** @since 1.0.0 */
     constructor() {
@@ -462,9 +463,17 @@ new (class Agent extends EventTarget {
      * @returns {string} - The public suffix for the given hostname, or the raw hostname if not public.
      */
     async #getPublicSuffix(hostname) {
-        let list = (await (await fetch(chrome.runtime.getURL("/public_suffix_list.dat"))).text())
-            .split("\n")
-            .filter((line) => !line.startsWith("//") && line.length);
+        if (!this.#publicSuffixList) {
+            this.#publicSuffixList = fetch(chrome.runtime.getURL("/public_suffix_list.dat"))
+                .then((response) => response.text())
+                .then((text) => text.split("\n").filter((line) => !line.startsWith("//") && line.length))
+                .catch((err) => {
+                    this.#publicSuffixList = null;
+                    throw err;
+                });
+        }
+
+        const list = await this.#publicSuffixList;
         for (let suffix = hostname; suffix.length; suffix = suffix.slice(suffix.indexOf(".") + 1)) {
             if (list.includes(`!${suffix}`)) continue;
             if (list.includes(suffix)) return suffix;
