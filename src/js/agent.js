@@ -278,6 +278,18 @@ new (class Agent extends EventTarget {
             return;
         }
 
+        if (port.name === "trigger") {
+            // relay messages between the content script and the top-level frame, so that iframe-triggered popups can
+            // be rendered in the top-level context and avoid issues with limited iframe viewport sizes.
+            const tab = port.sender.tab;
+            const topPort = chrome.tabs.connect(tab.id, { name: "trigger", frameId: 0 });
+            port.onMessage.addListener((message) => topPort.postMessage(message));
+            topPort.onMessage.addListener((message) => port.postMessage(message));
+            port.onDisconnect.addListener(() => topPort.disconnect());
+            topPort.onDisconnect.addListener(() => port.disconnect());
+            return;
+        }
+
         const updateStatus = (s) => port.postMessage({ action: "status", status: s });
         const clearStatus = () => port.postMessage({ action: "clear-status" });
         const clearErrors = (category = null) => port.postMessage({ action: "clear-errors", category });

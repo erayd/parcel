@@ -9,6 +9,48 @@
     var frameId = 0;
 
     /**
+     * Popup inter-frame trigger wiring
+     */
+    chrome.runtime.onConnect.addListener((port) => {
+        if (port.name !== "trigger") return;
+        port.onMessage.addListener(async (msg) => {
+            if (msg?.action === "trigger-popup") {
+                triggerPopup(msg.token, msg.frameId, msg.position);
+            } else if (msg?.action === "close-popup") {
+                document.querySelectorAll(".parcel-popup").forEach((popup) => popup.remove());
+            } else if (msg?.action === "resize-popup") {
+                const popup = document.querySelector(".parcel-popup");
+                if (popup) {
+                    popup.style.width = `${msg.width}px`;
+                    popup.style.height = `${msg.height}px`;
+                }
+            } else if (msg?.action === "untargeted-click") {
+                // if a popup exists, close it if the click was outside the popup
+                const popup = [...document.querySelectorAll(".parcel-popup")].sort((a, b) => b._parcelCreated - a._parcelCreated)?.[0];
+                if (popup) {
+                    const frameEl = [...document.querySelectorAll("iframe")].find((f) => f._parcelFrameId === msg.frameId);
+                    if (frameEl) {
+                        const frameRect = frameEl.getBoundingClientRect();
+                        msg.x += frameRect.left;
+                        msg.y += frameRect.top;
+                    }
+
+                    const popupRect = popup.getBoundingClientRect();
+                    if (!(msg.x >= popupRect.left && msg.x <= popupRect.right && msg.y >= popupRect.top && msg.y <= popupRect.bottom))
+                        popup.remove();
+                }
+            }
+        });
+    });
+    const triggerPort = chrome.runtime.connect({ name: "trigger" });
+    window.addEventListener("message", (ev) => {
+        if (ev.data?.action === "parcel-frame-id") {
+            const frameEl = [...document.querySelectorAll("iframe")].find((f) => f.contentWindow === ev.source);
+            if (frameEl) frameEl._parcelFrameId = ev.data.frameId;
+        }
+    });
+
+    /**
      * Configuration object
      * @since 1.0.0
      */
@@ -18,6 +60,7 @@
             if (msg.action === "config") {
                 port.disconnect();
                 frameId = msg?.frameId || 0;
+                if (window !== window.top) window.top.postMessage({ action: "parcel-frame-id", frameId }, "*");
                 resolve(msg.config);
             }
         });
@@ -203,19 +246,37 @@
     /**
      * Triggers a popup for the given element.
      * @since 1.0.0
-     * @param {HTMLElement} element - The element to trigger the popup for.
      * @param {string} token - The token for the element.
+     * @param {number} frameId - The ID of the frame in which the target element resides.
+     * @param {DOMRect} position - The position of the target element.
      * @returns {void}
      */
-    function triggerPopup(el, token) {
-        Helpers.shadowSelectorAll(".parcel-popup").forEach((popup) => {
-            if (popup._parcelToken !== token) {
-                popup.remove();
-            }
-        });
-        const popup = (el._parcelPopup = document.createElement("div"));
-        popup._parcelTarget = el;
+    function triggerPopup(token, frameId, position) {
+        // remove old popups
+        for (const popup of [...Helpers.shadowSelectorAll(".parcel-popup")]) {
+            popup.remove();
+            if (popup._parcelToken === token) return; // Don't reopen the popup if we just clicked its target field to close it
+        }
+
+        // adjust coordinates if the target element is inside an iframe
+        const frameEl = [...document.querySelectorAll("iframe")].find((f) => f._parcelFrameId === frameId);
+        if (frameEl) {
+            const frameRect = frameEl.getBoundingClientRect();
+            position = {
+                top: position.top + frameRect.top,
+                bottom: position.bottom + frameRect.top,
+                left: position.left + frameRect.left,
+                right: position.right + frameRect.left,
+                x: position.x + frameRect.left,
+                y: position.y + frameRect.top,
+            };
+        }
+
+        //const popup = (el._parcelPopup = document.createElement("div"));
+        //popup._parcelTarget = el;
+        const popup = document.createElement("div");
         popup._parcelCreated = Date.now();
+        popup._parcelToken = token;
         popup.setAttribute(
             "style",
             "color-scheme: initial; forced-color-adjust: initial; mask: initial; math-depth: initial; position: fixed; position-anchor: initial; text-size-adjust: initial; appearance: initial; color: initial; font: initial; font-palette: initial; font-synthesis: initial; position-area: initial; text-orientation: initial; text-rendering: initial; text-spacing-trim: initial; -webkit-font-smoothing: initial; -webkit-locale: initial; -webkit-text-orientation: initial; -webkit-writing-mode: initial; writing-mode: initial; zoom: initial; accent-color: initial; place-content: initial; place-items: initial; place-self: initial; alignment-baseline: initial; anchor-name: initial; anchor-scope: initial; animation-composition: initial; animation: initial; app-region: initial; aspect-ratio: initial; backdrop-filter: initial; backface-visibility: initial; background: initial; background-blend-mode: initial; baseline-shift: initial; baseline-source: initial; block-size: initial; border-block: initial; border: none; border-radius: initial; border-collapse: initial; border-end-end-radius: initial; border-end-start-radius: initial; border-inline: initial; border-start-end-radius: initial; border-start-start-radius: initial; bottom: initial; box-decoration-break: initial; box-shadow: rgba(0, 0, 0, 0.1) 0px 0px 0px 1px, rgba(0, 0, 0, 0.1) 0px 4px 20px; box-sizing: initial; break-after: initial; break-before: initial; break-inside: initial; buffered-rendering: initial; caption-side: initial; caret-color: initial; clear: initial; clip: initial; clip-path: initial; clip-rule: initial; color-interpolation: initial; color-interpolation-filters: initial; color-rendering: initial; columns: initial; column-fill: initial; gap: initial; column-rule: initial; column-span: initial; contain: initial; contain-intrinsic-block-size: initial; contain-intrinsic-size: initial; contain-intrinsic-inline-size: initial; container: initial; content: initial; content-visibility: initial; counter-increment: initial; counter-reset: initial; counter-set: initial; cursor: initial; cx: initial; cy: initial; d: initial; display: initial; dominant-baseline: initial; empty-cells: initial; field-sizing: initial; fill: initial; fill-opacity: initial; fill-rule: initial; filter: initial; flex: initial; flex-flow: initial; float: initial; flood-color: initial; flood-opacity: initial; grid: initial; grid-area: initial; height: initial; hyphenate-character: initial; hyphenate-limit-chars: initial; hyphens: initial; image-orientation: initial; image-rendering: initial; initial-letter: initial; inline-size: initial; inset-block: initial; inset-inline: initial; interpolate-size: initial; isolation: initial; left: initial; letter-spacing: initial; lighting-color: initial; line-break: initial; list-style: initial; margin-block: initial; margin: initial; margin-inline: initial; marker: initial; mask-type: initial; math-shift: initial; math-style: initial; max-block-size: initial; max-height: initial; max-inline-size: initial; max-width: initial; min-block-size: initial; min-height: initial; min-inline-size: initial; min-width: initial; mix-blend-mode: initial; object-fit: initial; object-position: initial; object-view-box: initial; offset: initial; opacity: initial; order: initial; orphans: initial; outline: 0px; outline-offset: initial; overflow-anchor: initial; overflow-block: initial; overflow-clip-margin: initial; overflow-inline: initial; overflow-wrap: initial; overflow: initial; overlay: initial; overscroll-behavior-block: initial; overscroll-behavior-inline: initial; overscroll-behavior: initial; padding-block: initial; padding: initial; padding-inline: initial; page: initial; page-orientation: initial; paint-order: initial; perspective: initial; perspective-origin: initial; pointer-events: initial; position-try: initial; position-visibility: initial; quotes: initial; r: initial; resize: initial; right: initial; rotate: initial; ruby-align: initial; ruby-position: initial; rx: initial; ry: initial; scale: initial; scroll-behavior: initial; scroll-initial-target: initial; scroll-margin-block: initial; scroll-margin: initial; scroll-margin-inline: initial; scroll-marker-group: initial; scroll-padding-block: initial; scroll-padding: initial; scroll-padding-inline: initial; scroll-snap-align: initial; scroll-snap-stop: initial; scroll-snap-type: initial; scroll-timeline: initial; scrollbar-color: initial; scrollbar-gutter: initial; scrollbar-width: initial; shape-image-threshold: initial; shape-margin: initial; shape-outside: initial; shape-rendering: initial; size: initial; speak: initial; stop-color: initial; stop-opacity: initial; stroke: initial; stroke-dasharray: initial; stroke-dashoffset: initial; stroke-linecap: initial; stroke-linejoin: initial; stroke-miterlimit: initial; stroke-opacity: initial; stroke-width: initial; tab-size: initial; table-layout: initial; text-align: initial; text-align-last: initial; text-anchor: initial; text-box: initial; text-combine-upright: initial; text-decoration: initial; text-decoration-skip-ink: initial; text-emphasis: initial; text-emphasis-position: initial; text-indent: initial; text-overflow: initial; text-shadow: initial; text-transform: initial; text-underline-offset: initial; text-underline-position: initial; text-wrap: initial; timeline-scope: initial; top: initial; touch-action: initial; transform: initial; transform-box: initial; transform-origin: initial; transform-style: initial; transition: initial; translate: initial; user-select: initial; vector-effect: initial; vertical-align: initial; view-timeline: initial; view-transition-class: initial; view-transition-name: initial; visibility: visible; border-spacing: initial; -webkit-box-align: initial; -webkit-box-decoration-break: initial; -webkit-box-direction: initial; -webkit-box-flex: initial; -webkit-box-ordinal-group: initial; -webkit-box-orient: initial; -webkit-box-pack: initial; -webkit-box-reflect: initial; -webkit-line-break: initial; -webkit-line-clamp: initial; -webkit-mask-box-image: initial; -webkit-print-color-adjust: initial; -webkit-rtl-ordering: initial; -webkit-ruby-position: initial; -webkit-tap-highlight-color: initial; -webkit-text-combine: initial; -webkit-text-decorations-in-effect: initial; -webkit-text-fill-color: initial; -webkit-text-security: initial; -webkit-text-stroke: initial; -webkit-user-drag: initial; white-space-collapse: initial; widows: initial; width: initial; will-change: initial; word-break: initial; word-spacing: initial; x: initial; y: initial; z-index: 2147483647;",
@@ -223,8 +284,8 @@
         popup.classList.add("parcel-popup");
         const root = popup.attachShadow({ mode: "closed" });
         popup.style.position = "absolute";
-        popup.style.top = `${el.getBoundingClientRect().bottom + 5}px`;
-        popup.style.left = `${el.getBoundingClientRect().left + 5}px`;
+        popup.style.top = `${position.bottom + 5}px`;
+        popup.style.left = `${position.left + 5}px`;
         popup.style.color = "black";
         popup.style.backgroundColor = "white";
         popup.style.border = "1px solid black";
@@ -261,38 +322,51 @@
      * Trigger the popup when the element is clicked.
      * @since 1.0.0
      * @param {HTMLElement} target - The clicked element.
-     * @param {boolean} shadow - Whether the click originated from a shadow DOM.
+     * @param {number} x - The x coordinate of the click.
+     * @param {number} y - The y coordinate of the click.
      * @returns {void}
      */
-    async function handleTriggerClick(target) {
-        let popup = document.querySelector(".parcel-popup");
+    async function handleTriggerClick(target, x, y) {
+        if (target._lastClicked && target._lastClicked > Date.now() - 350) return; // debounce multiple quick clicks
+        target._lastClicked = Date.now();
+
+        //let popup = document.querySelector(".parcel-popup");
         let targetInfo = await getTargetInfo(target);
         if (targetInfo) {
-            try {
-                target._parcelToken = crypto.randomUUID();
-            } catch (err) {
-                // fallback for browsers without crypto.randomUUID(), typically insecure pages lacking the crypto API
-                target._parcelToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
+            if (!target.hasOwnProperty("_parcelToken")) {
+                try {
+                    target._parcelToken = crypto.randomUUID();
+                } catch (err) {
+                    // fallback for browsers without crypto.randomUUID(), typically insecure pages lacking the crypto API
+                    target._parcelToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
+                }
             }
             targetBindings[target._parcelToken] = target;
             authPort.postMessage(target._parcelToken);
-            if (popup) {
-                popup.remove();
-                if (target === popup._parcelTarget) return; // Don't reopen the popup if we just clicked its target field to close it
-            }
             target.setAttribute("parcel-selector", targetInfo.selector);
             target.setAttribute("parcel-type", targetInfo.type);
-            triggerPopup(target, target._parcelToken);
-        } else if (popup && popup._parcelCreated < Date.now() - 350) popup.remove();
+
+            // dispatch clicks to the handler in the root frame so that the popup can be rendered there
+            const position = target.getBoundingClientRect();
+            triggerPort.postMessage({
+                action: "trigger-popup",
+                frameId,
+                token: target._parcelToken,
+                position: target.getBoundingClientRect(),
+            });
+        } else {
+            // dispatch other clicks to the root frame too, so that they can be used to close the popup
+            triggerPort.postMessage({ action: "untargeted-click", frameId, x, y });
+        }
     }
 
     if (!(await config).disableContextPopup) {
-        document.addEventListener("click", (ev) => handleTriggerClick(ev.target), { capture: true, passive: true });
+        document.addEventListener("click", (ev) => handleTriggerClick(ev.target, ev.clientX, ev.clientY), { capture: true, passive: true });
         document.addEventListener(
             "parcel-shadow-click",
             async (ev) => {
                 const target = Helpers.shadowSelector(`[parcel-shadow-event="${ev.detail.target}"]`, document);
-                if (target) handleTriggerClick(target);
+                if (target) handleTriggerClick(target, ev.clientX, ev.clientY);
             },
             { capture: true, passive: true },
         );
@@ -304,6 +378,8 @@
      */
     chrome.runtime.onConnect.addListener(async (port) => {
         if (!port.name) return;
+        if (port.name === "trigger") return; // handled in another listener
+
         if (!targetBindings.hasOwnProperty(port.name) && port.name !== "broadcast") {
             port.postMessage({ action: "close" });
             port.disconnect();
@@ -360,7 +436,7 @@
                 updateStatus("Filling value...");
                 await fillField(el, null, null, null, msg.value);
                 port.postMessage({ action: "close" });
-                el._parcelPopup?.remove();
+                triggerPort.postMessage({ action: "close-popup" });
             } else if (msg?.action === "fill") {
                 // fill the target field, and related fields if configured
                 try {
@@ -378,7 +454,7 @@
                         }
                     }
                     port.postMessage({ action: "close" });
-                    el._parcelPopup?.remove();
+                    triggerPort.postMessage({ action: "close-popup" });
 
                     // submit the form if configured, else try to focus the submit button
                     const submitTargets = (await validTargets).filter((t) => t.type === "submit");
@@ -396,17 +472,9 @@
                     port.postMessage({ action: "error", error: err.message });
                 }
             } else if (msg?.action === "resize") {
-                const popup = el._parcelPopup;
-                if (popup) {
-                    popup.style.height = `${msg.height}px`;
-                    popup.style.width = `${msg.width}px`;
-                }
+                triggerPort.postMessage({ action: "resize-popup", height: msg.height, width: msg.width });
             } else if (msg?.action === "close") {
-                let popup = el._parcelPopup;
-                if (popup) {
-                    popup.remove();
-                    popup._parcelTarget?.focus();
-                }
+                triggerPort.postMessage({ action: "close-popup" });
             }
         });
     });
