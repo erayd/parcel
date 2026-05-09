@@ -302,12 +302,7 @@ new (class Agent extends EventTarget {
                 if (message?.action === "match") {
                     updateStatus("Searching for matching entries...");
                     // get matching entries
-                    const result = await this.search(
-                        message.url,
-                        message.search || "",
-                        message.limit,
-                        message.history.map((entry) => entry.path),
-                    );
+                    const result = await this.search(message.url, message.search || "", message.limit, message.history);
                     clearStatus();
                     port.postMessage({ action: "match", entries: result });
                 } else if (message?.action === "decrypt") {
@@ -395,6 +390,13 @@ new (class Agent extends EventTarget {
      * @returns {object[]} - The matching entries.
      */
     async search(url, search, limit = true, history = []) {
+        // consolidate history to most-recent entry per item
+        history = history.reduce((acc, entry) => {
+            if (!acc.hasOwnProperty(entry.path)) acc[entry.path] = entry;
+            else if (acc[entry.path].when < entry.when) acc[entry.path] = entry;
+            return acc;
+        }, {});
+
         const origin = new URL(url);
         let matches = [];
 
@@ -405,7 +407,7 @@ new (class Agent extends EventTarget {
             for (let s = origin.hostname; s.length && s !== suffix; s = s.slice(s.indexOf(".") + 1)) slices.push(s);
             for (let entry of await this.#getEntries()) {
                 const hash = await Helpers.sha256(entry.path);
-                entry.isInHistory = history.includes(hash);
+                entry.history = history?.[hash];
 
                 const parts = entry.name.split("/").reverse();
                 entry.matchesHost = parts.includes(origin.host);
@@ -418,7 +420,7 @@ new (class Agent extends EventTarget {
                         }
                     }
                 }
-                if (entry.isInHistory || entry.matchesHost || entry.matchesHostPart) {
+                if (entry.history || entry.matchesHost || entry.matchesHostPart) {
                     matches.push(entry);
                 }
             }
@@ -434,8 +436,9 @@ new (class Agent extends EventTarget {
                 matches[i].sortOrder = i;
             }
             matches = matches.sort((a, b) => {
-                if (a.isInHistory && !b.isInHistory) return -1;
-                if (!a.isInHistory && b.isInHistory) return 1;
+                if (a.history && !b.history) return -1;
+                if (!a.history && b.history) return 1;
+                if (a.history && b.history) return b.history.when - a.history.when;
                 return a.sortOrder - b.sortOrder;
             });
         }
