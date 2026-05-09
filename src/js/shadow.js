@@ -7,6 +7,7 @@ if (!_attachShadow) {
     Element.prototype.attachShadow = function (options) {
         const root = _attachShadow.call(this, options);
         setTimeout(() => {
+            // move the hook logic outside of the attachShadow call to avoid it from running inside anybody's custom element constructor
             const hostUUID = crypto.randomUUID();
             this.setAttribute("is-shadow", "");
             this.setAttribute("parcel-shadow-host", hostUUID);
