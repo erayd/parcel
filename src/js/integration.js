@@ -366,7 +366,8 @@
             "parcel-shadow-click",
             async (ev) => {
                 const target = Helpers.shadowSelector(`[parcel-shadow-event="${ev.detail.target}"]`, document);
-                if (target) handleTriggerClick(target, ev.clientX, ev.clientY);
+                target.removeAttribute("parcel-shadow-event");
+                if (target) handleTriggerClick(target, ev.detail.x, ev.detail.y);
             },
             { capture: true, passive: true },
         );
