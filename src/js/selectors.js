@@ -11,6 +11,9 @@ export var targetSelectors = [
     { selector: "input[type=search i]", type: "blacklist" },
     { selector: "input[type=hidden i]", type: "blacklist" },
 
+    // type: related
+    { selector: "form", type: "aggregate" },
+
     // type: secret
     { selector: "input[autocomplete~=current-password i]", type: "secret" },
     { selector: "input[type=password i]", type: "secret" },
@@ -72,6 +75,15 @@ export var targetSelectors = [
     // type: cardcsc
     { selector: "input[autocomplete~=cc-csc i]", type: "cardcsc" },
 ];
+
+// bulk aggregation selectors
+for (let u of ["login", "sign", "auth", "account", "user"]) {
+    for (let t of ["div", "section", "p"]) {
+        for (let s of ["class", "id"]) {
+            targetSelectors.push({ selector: `${t}[${s}*=${u} i]`, type: "aggregate" });
+        }
+    }
+}
 
 // bulk login selectors
 for (let s of ["login", "user", "username", "email"]) {

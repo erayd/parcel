@@ -132,11 +132,15 @@
      */
     async function getRelatedFields(el) {
         const targetInfo = await getTargetInfo(el);
-        const form = el.closest("form");
-        if (!form) return [];
+        const aggregationSelectors = (await targetSelectors).targetSelectors.filter((s) => s.type === "aggregate");
+        for (let s of aggregationSelectors) {
+            var group = el.closest(s.selector);
+            if (group) break;
+        }
+        if (!group) return [];
         const relatedFields = [];
         for (let target of (await validTargets).filter((t) => targetInfo.related.includes(t.type))) {
-            for (const field of form.querySelectorAll(target.selector)) {
+            for (const field of group.querySelectorAll(target.selector)) {
                 if (relatedFields.includes(field) || field === el) continue;
                 let isInvalid = false;
                 for (let target of await invalidTargets) {
