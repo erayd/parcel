@@ -482,6 +482,8 @@
                 } catch (err) {
                     console.warn(err);
                     port.postMessage({ action: "error", error: err.message });
+                } finally {
+                    delete el._parcelToken; // remove the token to prevent stale bindings in case of subsequent context-popup invocations
                 }
             } else if (msg?.action === "resize") {
                 triggerPort.postMessage({ action: "resize-popup", height: msg.height, width: msg.width });
