@@ -93,35 +93,35 @@
      * @returns {string|null} - The target type or null if not found.
      */
     async function getTargetInfo(el, related = false) {
-        if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return null;
         try {
-            if (el.hasAttribute("type") && !["text", "email", "tel", "password"].includes(el.type)) return null;
-        } catch (err) {
-            console.log(el);
-            throw err;
-        }
-        let finalTarget = null;
-        for (let target of (await validTargets).filter((t) => (related ? true : !t.relatedOnly))) {
-            if (el.matches(target.selector) && !el.readOnly && !el.disabled) {
-                finalTarget = target;
-                break;
+            if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
+                throw new Error("Target element is not visible.");
             }
-        }
-        if (finalTarget) {
-            for (let target of (await invalidTargets).filter((t) => (related ? true : !t.relatedOnly))) {
-                if (el.matches(target.selector)) {
-                    finalTarget = null;
-                    el.setAttribute("parcel-blacklist", target.selector);
+            if (el.hasAttribute("type") && !["text", "email", "tel", "password"].includes(el.type))
+                throw new Error(`Invalid input type: ${el.type}`);
+            let finalTarget = null;
+            for (let target of (await validTargets).filter((t) => (related ? true : !t.relatedOnly))) {
+                if (el.matches(target.selector) && !el.readOnly && !el.disabled) {
+                    finalTarget = target;
                     break;
                 }
             }
             if (finalTarget) {
+                for (let target of (await invalidTargets).filter((t) => (related ? true : !t.relatedOnly))) {
+                    if (el.matches(target.selector)) {
+                        el.setAttribute("parcel-blacklist", target.selector);
+                        throw new Error(`Target element matches a blacklist selector: ${target.selector}`);
+                    }
+                }
                 finalTarget.related =
                     (await config).targets.concat((await config).additionalTargets || []).find((t) => t.name === finalTarget.type)
                         ?.related || [];
             }
+            return finalTarget;
+        } catch (err) {
+            console.info(el); // log the target element to assist with troubleshooting selector issues
+            throw err;
         }
-        return finalTarget;
     }
 
     /**
@@ -146,8 +146,13 @@
                     }
                 }
                 if (isInvalid) continue;
-                if (!field.targetInfo) field.targetInfo = await getTargetInfo(field, true);
-                if (field.targetInfo && targetInfo.related.includes(field.targetInfo?.type)) relatedFields.push(field);
+                try {
+                    if (!field.targetInfo) field.targetInfo = await getTargetInfo(field, true);
+                    if (targetInfo.related.includes(field.targetInfo?.type)) relatedFields.push(field);
+                } catch (err) {
+                    // if getTargetInfo throws, it means the field is not fillable, but we can ignore
+                    // the error because we're only using it as an eligibility test for related fields
+                }
             }
         }
         return relatedFields;
@@ -165,7 +170,11 @@
      */
     async function fillField(el, plaintext, config, type = null, fillValue = null, isRelated = false) {
         if (!el.parentNode) throw new Error("Target element has been removed from the DOM.");
-        const targetInfo = await getTargetInfo(el, isRelated);
+        try {
+            var targetInfo = await getTargetInfo(el, isRelated);
+        } catch (err) {
+            throw new Error(`Target element is not eligible for autofill: ${err.message}`);
+        }
         if (!type) type = targetInfo.type;
         if (fillValue === null) fillValue = await Helpers.getValue(plaintext, config, type);
         if (typeof fillValue === "object" && fillValue.hasOwnProperty("value")) fillValue = fillValue.value;
@@ -332,8 +341,8 @@
         target._lastClicked = Date.now();
 
         //let popup = document.querySelector(".parcel-popup");
-        let targetInfo = await getTargetInfo(target);
-        if (targetInfo) {
+        try {
+            const targetInfo = await getTargetInfo(target);
             if (!target.hasOwnProperty("_parcelToken")) {
                 try {
                     target._parcelToken = crypto.randomUUID();
@@ -355,7 +364,7 @@
                 token: target._parcelToken,
                 position: target.getBoundingClientRect(),
             });
-        } else {
+        } catch (err) {
             // dispatch other clicks to the root frame too, so that they can be used to close the popup
             triggerPort.postMessage({ action: "untargeted-click", frameId, x, y });
         }
@@ -426,8 +435,9 @@
             port.disconnect();
             return;
         }
-        const targetInfo = await getTargetInfo(el);
-        if (!targetInfo) {
+        try {
+            var targetInfo = await getTargetInfo(el);
+        } catch (err) {
             port.postMessage({ action: "error", error: "The selected autofill candidate was unsuitable." });
             port.disconnect();
             return;
