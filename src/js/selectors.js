@@ -13,6 +13,7 @@ export var targetSelectors = [
 
     // type: related
     { selector: "form", type: "aggregate" },
+    { selector: "#form", type: "aggregate" },
 
     // type: secret
     { selector: "input[autocomplete~=current-password i]", type: "secret" },
