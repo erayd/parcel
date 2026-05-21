@@ -399,9 +399,6 @@
         } else if (msg.action === "clear-status") {
             document.querySelector("#status").textContent = "Idle";
         } else if (msg.action === "match") {
-            while (ul.firstChild) {
-                ul.removeChild(ul.firstChild);
-            }
             if (!msg.entries.length && !document.querySelector(".no-matches")) {
                 const p = document.createElement("p");
                 p.classList.add("list-notice", "no-matches");
@@ -410,8 +407,18 @@
             } else if (msg.entries.length) {
                 document.querySelector(".no-matches")?.remove();
             }
+            ul.querySelectorAll(":scope > li").forEach((el) => (el._keep = false));
             for (const entry of msg.entries) {
-                const li = document.createElement("li");
+                let li = ul.querySelector(`li[data-path="${entry.path}"]`);
+                if (li) {
+                    // reuse existing li elements
+                    li._keep = true;
+                    ul.appendChild(li);
+                    continue;
+                }
+                li = document.createElement("li");
+                li._keep = true;
+                li.setAttribute("data-path", entry.path);
                 if (entry.isInHistory) li.classList.add("history");
                 li.setAttribute("data-sort-order", entry.sortOrder);
 
@@ -477,7 +484,7 @@
                 li.appendChild(button);
 
                 li.addEventListener("click", async (ev) => {
-                    port.postMessage({ action: "decrypt", intent: "fill", path: entry.path }); // MARK
+                    port.postMessage({ action: "decrypt", intent: "fill", path: entry.path });
                     if (history?.[0]?.path === (await sha256(entry.path))) {
                         history[0].when = Date.now();
                     } else {
@@ -487,6 +494,9 @@
 
                 ul.appendChild(li);
             }
+            ul.querySelectorAll(":scope > li").forEach((el) => {
+                if (!el._keep) el.remove();
+            });
         } else if (msg.action === "plaintext") {
             if (msg.intent === "fill" && !tabPort.disconnected) {
                 tabPort.postMessage({ action: "fill", token, plaintext: msg.plaintext, config: await config });
