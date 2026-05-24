@@ -165,7 +165,7 @@ export const ConfigSchema = {
                 type: "object",
                 properties: {
                     class: { type: "string", required: true, enum: ["login"], default: "login" },
-                    color: { type: "string", pattern: "^[0-9a-f]{6}$", flags: "ui" },
+                    color: { type: "string", required: true, pattern: "^[0-9a-f]{6}$", flags: "ui", default: "333333" },
                     ignore: { type: "boolean", required: true, default: false },
                     pattern: { type: "string", required: true, format: "regex" },
                     strip: { type: "string", format: "regex" },

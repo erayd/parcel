@@ -11,6 +11,8 @@
     --color-text: light-dark(#000000, #dbdbdb);
     --color-text-error: #ffffff;
     --color-text-inverted: #ffffff;
+    --color-text-tag: #3a3a3a;
+    --color-text-tag-inverted: light-dark(#ffffff, #dbdbdb);
     --color-border: light-dark(#cccccc, #333333);
     --color-border-mid: #888888;
     --color-shadow: #4a4a4a;
