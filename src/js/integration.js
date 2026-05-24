@@ -20,10 +20,7 @@
                 document.querySelectorAll(".parcel-popup").forEach((popup) => popup.remove());
             } else if (msg?.action === "resize-popup") {
                 const popup = document.querySelector(".parcel-popup");
-                if (popup) {
-                    popup.style.width = `${msg.width}px`;
-                    popup.style.height = `${msg.height}px`;
-                }
+                if (popup) popup._resizeFn(msg.width, msg.height);
             } else if (msg?.action === "untargeted-click") {
                 // if a popup exists, close it if the click was outside the popup
                 const popup = [...document.querySelectorAll(".parcel-popup")].sort((a, b) => b._parcelCreated - a._parcelCreated)?.[0];
@@ -264,7 +261,7 @@
      * @param {DOMRect} position - The position of the target element.
      * @returns {void}
      */
-    function triggerPopup(token, frameId, position) {
+    async function triggerPopup(token, frameId, position) {
         // remove old popups
         for (const popup of [...Helpers.shadowSelectorAll(".parcel-popup")]) {
             popup.remove();
@@ -287,12 +284,11 @@
 
         // adjust coordinates for scroll position
         position = {
+            ...position,
             top: position.top + window.scrollY,
             bottom: position.bottom + window.scrollY,
             left: position.left + window.scrollX,
             right: position.right + window.scrollX,
-            x: position.x + window.scrollX,
-            y: position.y + window.scrollY,
         };
 
         const popup = document.createElement("div");
@@ -336,7 +332,20 @@
         frame.src = chrome.runtime.getURL(`/html/popup.html?token=${token}&frameId=${frameId}`);
         root.appendChild(frame);
 
+        // add hook to adjust size & position
+        popup._resizeFn = async (width = 0, height = 0) => {
+            if (width) popup.style.width = `${width}px`;
+            if (height) popup.style.height = `${height}px`;
+            await new Promise((resolve) => requestAnimationFrame(resolve)); // wait for the resize to take effect before adjusting position
+            const rect = popup.getBoundingClientRect();
+            if (position.y + rect.height + 5 > window.innerHeight) popup.style.top = `${position.top - rect.height - 5}px`;
+            else popup.style.top = `${position.bottom + 5}px`;
+            if (position.x + rect.width + 5 > window.innerWidth) popup.style.left = `${window.innerWidth - rect.width - 5}px`;
+            else popup.style.left = `${position.left + 5}px`;
+        };
+
         document.body.appendChild(popup);
+        popup._resizeFn();
     }
 
     /**
