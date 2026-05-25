@@ -79,7 +79,9 @@
     const validTargets = targetSelectors.then(async (targetSelectors) => {
         let selectors = targetSelectors.targetSelectors.concat((await config).additionalSelectors || []);
         Schema.validate(SelectorSchema, selectors);
-        return selectors.filter((t) => t.type !== "blacklist" && (!t.host || t.host.includes(window.location.hostname)));
+        return selectors.filter(
+            (t) => !["blacklist", "aggregate"].includes(t.type) && (!t.host || t.host.includes(window.location.hostname)),
+        );
     });
 
     /**
