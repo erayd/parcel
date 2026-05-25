@@ -79,7 +79,7 @@ export var targetSelectors = [
 
 // bulk aggregation selectors
 for (let u of ["login", "sign", "auth", "account", "user"]) {
-    for (let t of ["div", "section", "p"]) {
+    for (let t of ["div", "section", "p", "table"]) {
         for (let s of ["class", "id"]) {
             targetSelectors.push({ selector: `${t}[${s}*=${u} i]`, type: "aggregate" });
         }
