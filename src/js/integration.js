@@ -6,7 +6,7 @@
     const targetSelectors = import(chrome.runtime.getURL("/js/selectors.js"));
     const targetBindings = {};
     let authPort = chrome.runtime.connect({ name: "auth" });
-    window.addEventListener("pageshow", ev => {
+    window.addEventListener("pageshow", (ev) => {
         // re-establish connection to the auth port on bfcache restore
         if (ev.persisted) authPort = chrome.runtime.connect({ name: "auth" });
     });
@@ -44,7 +44,7 @@
         });
     });
     let triggerPort = chrome.runtime.connect({ name: "trigger" });
-    window.addEventListener("pageshow", ev => {
+    window.addEventListener("pageshow", (ev) => {
         // re-establish connection to the trigger port on bfcache restore
         if (ev.persisted) triggerPort = chrome.runtime.connect({ name: "trigger" });
     });
