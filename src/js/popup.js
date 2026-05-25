@@ -463,6 +463,7 @@
                             ev.stopPropagation();
                             history = history.filter((h) => h.path !== he.path);
                             chrome.storage.local.set({ [`history:${scope}:${hash}`]: history });
+                            port.postMessage({ action: "update-badge", tabId: tab.id });
                             historyButton.remove();
                             li.remove();
                             for (let el = ul.lastElementChild; el; el = el.previousElementSibling) {
@@ -515,6 +516,7 @@
                     const hash = await sha256(url.origin);
                     const scope = await sha256(tab.contextualIdentity ? tab.contextualIdentity : "default");
                     chrome.storage.local.set({ [`history:${scope}:${hash}`]: history.slice(0, (await config).historyLength) });
+                    port.postMessage({ action: "update-badge", tabId: tab.id });
                 }
             } else if (msg.intent === "detail") {
                 let plaintext = new Plaintext(msg.plaintext, config);

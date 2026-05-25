@@ -58,6 +58,35 @@ new (class Agent extends EventTarget {
             console.error(`Agent initialisation failed: ${err.message}`);
             this.dispatchEvent(new CustomEvent("initFailed", { detail: err.message }));
         }
+
+        // watch for changes to the active tab to update the icon badge
+        chrome.tabs.onActivated.addListener((activeInfo) => this.#updateBadge(activeInfo.tabId));
+        chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+            if (changeInfo.url || changeInfo.status === "complete") this.#updateBadge(tabId);
+        });
+    }
+
+    /**
+     * Update the counter badge for the given tab ID.
+     * @since 1.0.0
+     * @returns {void}
+     */
+    async #updateBadge(tabId) {
+        try {
+            const tab = await chrome.tabs.get(tabId);
+            if (!tab.url) throw new Error(`Unable to determine URL for tab ${tabId}`);
+            const origin = new URL(tab?.url)?.origin;
+            if (!origin) throw new Error(`Unable to determine origin for url: ${tab?.url}`);
+            const hash = await Helpers.sha256(origin);
+            const scope = await Helpers.sha256(tab.contextualIdentity ? tab.contextualIdentity : "default");
+            const history = (await chrome.storage.local.get(`history:${scope}:${hash}`))?.[`history:${scope}:${hash}`] || [];
+            const matches = await this.search(origin, "", true, history);
+            if (!matches.length) throw new Error(`No matching entries found for origin: ${origin}`);
+            await chrome.action.setBadgeText({ text: matches.length.toString(), tabId });
+            await chrome.action.setBadgeBackgroundColor({ color: "#0078D4", tabId });
+        } catch (err) {
+            await chrome.action.setBadgeText({ text: "", tabId });
+        }
     }
 
     /**
@@ -359,6 +388,8 @@ new (class Agent extends EventTarget {
                     // provide a SHA-256 hash of the given value
                     const hash = await Helpers.sha256(message.value);
                     port.postMessage({ action: "sha256-digest", value: message.value, hash });
+                } else if (message?.action === "update-badge") {
+                    this.#updateBadge(message.tabId);
                 }
                 if (message.hasOwnProperty("action")) clearErrors(message.action);
             } catch (err) {
