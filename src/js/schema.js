@@ -157,6 +157,7 @@ export const ConfigSchema = {
         fillRelated: { type: "boolean", required: true, default: true },
         historyLength: { type: "integer", required: true, minimum: 0, default: 40 },
         modified: { type: "integer", required: true, minimum: 1 },
+        saveHistory: { type: "boolean", required: true, default: true },
         passdir: { type: "string", required: true },
         rules: {
             type: "array",

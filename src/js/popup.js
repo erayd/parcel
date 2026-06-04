@@ -510,7 +510,7 @@
         } else if (msg.action === "plaintext") {
             if (msg.intent === "fill" && !tabPort.disconnected) {
                 tabPort.postMessage({ action: "fill", token, plaintext: msg.plaintext, config: await config });
-                if (tab.url) {
+                if (tab.url && (await config).saveHistory) {
                     const url = new URL(tab.url);
                     const hash = await sha256(url.origin);
                     const scope = await sha256(tab.contextualIdentity ? tab.contextualIdentity : "default");
