@@ -504,13 +504,22 @@
                     port.postMessage({ action: "close" });
                     triggerPort.postMessage({ action: "close-popup" });
 
-                    // submit the form if configured, else try to focus the submit button
+                    // try to focus the submit button
                     const submitTargets = (await validTargets).filter((t) => t.type === "submit");
-                    const form = el.closest("form");
-                    if (form) {
+                    let group;
+                    const aggregationSelectors = (await targetSelectors).targetSelectors.filter((s) => s.type === "aggregate");
+                    for (let s of aggregationSelectors) {
+                        group = el.closest(s.selector);
+                        if (group) break;
+                    }
+                    if (group) {
                         for (let target of submitTargets) {
-                            let submitButton = form.querySelector(target.selector);
-                            if (submitButton) submitButton.focus();
+                            let submitButton = group.querySelector(target.selector);
+                            if (submitButton) {
+                                await new Promise((resolve) => requestAnimationFrame(resolve));
+                                submitButton.focus();
+                                break;
+                            }
                         }
                     } else {
                         el.focus();
