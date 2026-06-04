@@ -151,14 +151,15 @@ export const ConfigSchema = {
     properties: {
         additionalSelectors: SelectorSchema,
         additionalTargets: { type: "array", items: TargetSchema },
+        auditDecrypt: { type: "boolean", required: true, default: false },
         cacheTTL: { type: "number", required: true, minimum: 0, default: 10 },
         decryptTimeout: { type: "number", required: true, minimum: 1, default: 60 },
         disableContextPopup: { type: "boolean", required: true, default: false },
         fillRelated: { type: "boolean", required: true, default: true },
         historyLength: { type: "integer", required: true, minimum: 0, default: 40 },
         modified: { type: "integer", required: true, minimum: 1 },
-        saveHistory: { type: "boolean", required: true, default: true },
         passdir: { type: "string", required: true },
+        saveHistory: { type: "boolean", required: true, default: true },
         rules: {
             type: "array",
             minItems: 1,

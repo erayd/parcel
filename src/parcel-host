@@ -107,10 +107,26 @@ function action_list() {
     parcel_send "$OUT"
 }
 
+# audit a decryption attempt
+function audit_decrypt() {
+    local SHOULD_AUDIT="$(jq -r '.auditDecrypt' <<< "$CONFIG")"
+    if [ "$SHOULD_AUDIT" != "true" ]; then
+        return 0
+    fi
+    local FILE_PATH="$1"
+    local TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    local MESSAGE="$2"
+    local INTENT="$3"
+    local ORIGIN="$4"
+    echo "[$TIMESTAMP] DECRYPT $INTENT $ORIGIN $FILE_PATH: $MESSAGE" >&5
+}
+
 # decrypt and return the contents of a password entry
 function action_decrypt() {
     update_config
     local FILE_PATH="$(jq -r '.path' <<< "$1")"
+    local INTENT="$(jq -r '.intent' <<< "$1")"
+    local ORIGIN="$(jq -r '.origin' <<< "$1")"
     local ALLOW=0
     local OUT
     for ALLOWED in "${ALLOWED_FILES[@]}"; do
@@ -120,16 +136,20 @@ function action_decrypt() {
         fi
     done
     if [ $ALLOW -ne 1 ]; then
+        audit_decrypt "$FILE_PATH" "Denied (path out of scope)" "$INTENT" "$ORIGIN"
         parcel_error "Access Denied: Path out of scope: $FILE_PATH"
         return 0
     fi
     if [ ! -f "$FILE_PATH" ]; then
+        audit_decrypt "$FILE_PATH" "File not found" "$INTENT" "$ORIGIN"
         parcel_error "File not found: $FILE_PATH"
         return 0
     fi
     if ! OUT="$(gpg --decrypt --quiet --batch --no-tty --yes < "$FILE_PATH" 2>/dev/null)"; then
+        audit_decrypt "$FILE_PATH" "Decryption failed" "$INTENT" "$ORIGIN"
         parcel_error "Failed to decrypt $FILE_PATH"
         return 0
     fi
+    audit_decrypt "$FILE_PATH" "Success" "$INTENT" "$ORIGIN"
     parcel_send "$(jq -n --arg path "$FILE_PATH" --arg plaintext "$OUT" '{path: $path, plaintext: $plaintext}')"
 }

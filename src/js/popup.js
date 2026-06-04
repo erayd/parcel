@@ -489,12 +489,12 @@
                     document.querySelector(".selected")?.classList.remove("selected");
                     button.closest("li").classList.add("selected");
                     document.getElementById("modal-shade").classList.remove("hidden");
-                    port.postMessage({ action: "decrypt", intent: "detail", path: entry.path });
+                    port.postMessage({ action: "decrypt", intent: "detail", origin: url.origin, path: entry.path });
                 });
                 li.appendChild(button);
 
                 li.addEventListener("click", async (ev) => {
-                    port.postMessage({ action: "decrypt", intent: "fill", path: entry.path });
+                    port.postMessage({ action: "decrypt", intent: "fill", origin: url.origin, path: entry.path });
                     if (history?.[0]?.path === (await sha256(entry.path))) {
                         history[0].when = Date.now();
                     } else {

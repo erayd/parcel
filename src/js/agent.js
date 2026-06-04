@@ -329,7 +329,11 @@ new (class Agent extends EventTarget {
                 } else if (message?.action === "decrypt") {
                     // decrypt the specified entry
                     updateStatus("Decrypting entry...");
-                    const result = await this.#callNative("decrypt", { path: message.path }, this.#config.decryptTimeout * 1000);
+                    const result = await this.#callNative(
+                        "decrypt",
+                        { path: message.path, intent: message.intent, origin: message.origin },
+                        this.#config.decryptTimeout * 1000,
+                    );
                     try {
                         clearStatus();
                         port.postMessage({ action: "plaintext", intent: message.intent, plaintext: result.plaintext });
