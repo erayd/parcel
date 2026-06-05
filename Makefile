@@ -59,3 +59,6 @@ endif
 .PHONY: test-native
 test-native:
 	node test/native-host-test.js
+
+.PHONY: test
+test: test-native
