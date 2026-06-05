@@ -7,7 +7,7 @@ all: extension chrome firefox
 
 .PHONY: extension
 extension:
-	$(MAKE) VERSION=$(VERSION) WEBPACK_MODE=$(WEBPACK_MODE) -C ./src
+	$(MAKE) VERSION=$(VERSION) -C ./src
 
 .PHONY: clean
 clean:
