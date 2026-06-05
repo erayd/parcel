@@ -58,7 +58,19 @@ endif
 
 .PHONY: test-native
 test-native:
-	node test/native-host-test.js
+	node test/native-host.test.js
+
+.PHONY: test-browser-mock
+test-browser-mock:
+	node --test test/chrome-api-mock.test.js
+
+.PHONY: test-modules
+test-modules:
+	node --test test/helpers.test.js
 
 .PHONY: test
-test: test-native
+test:
+	node --test \
+		test/native-host.test.js \
+		test/chrome-api-mock.test.js \
+		test/helpers.test.js
