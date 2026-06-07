@@ -7,10 +7,12 @@
 | Build the shared extension bundle | `make extension` | Runs `make -C src`, formats source with Prettier, and writes generated assets to `src/dist/`. |
 | Build the Chrome bundle | `make chrome` | Rebuilds `src/dist/` and syncs it into `chrome/`. |
 | Build the Firefox bundle | `make firefox` | Rebuilds `src/dist/`, syncs it into `firefox/`, rewrites the manifest for Firefox, and switches module content scripts to the `.es6.js` shim. |
-| Format source | `make -C src prettier` | This is the repo's only Parcel-owned formatting/lint-like command. |
+| Format source | `make prettier` | Formats `test/*.{js,json}` and then runs `make -C src prettier`, which writes all `src/**/*.{js,json,less,css,html,xhtml}`. |
 | Clean generated artifacts | `make clean` | Removes `src/dist/`, `chrome/`, `firefox/`, and top-level `dist/`. |
+| Run all tests | `make test` | Runs the full test suite with `node --test` across all `test/*.test.js` files (browser mock, helpers, native host, plaintext, schema, selectors, targets). |
+| Run individual test groups | `make test-native`, `make test-browser-mock`, `make test-modules` | Native-host integration tests; Chrome-API mock tests; shared-module unit tests respectively. |
 
-Parcel itself does **not** define an automated test suite or single-test command in this repository. Do not use `src/publicsuffix` as Parcel test guidance unless the task explicitly targets that vendored subtree.
+Do not use `src/publicsuffix` as Parcel test guidance unless the task explicitly targets that vendored subtree.
 
 ## High-level architecture
 
@@ -24,6 +26,7 @@ Parcel itself does **not** define an automated test suite or single-test command
 - The native side is split in two:
   - the repo-root `parcel-host` bootstrap host, which verifies signatures and loads the bundled script,
   - `src/parcel-host`, the signed host implementation that reads `~/.password-store`, filters entries against `.parcel.json`, and decrypts only paths that were previously whitelisted by `action_list`.
+- Tests live under `test/` and exercise both Node-side modules (using direct `import`) and the native host (using isolated temporary environments with mocked GPG). A reusable Chrome API mock lives in `test/chrome-api-mock.js` to support testing extension-facing code in Node.
 
 ## Key conventions
 
