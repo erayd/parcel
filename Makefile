@@ -66,7 +66,7 @@ test-browser-mock:
 
 .PHONY: test-modules
 test-modules:
-	node --test test/helpers.test.js test/plaintext.test.js test/schema.test.js
+	node --test test/helpers.test.js test/plaintext.test.js test/schema.test.js test/selectors.test.js test/targets.test.js
 
 .PHONY: test
 test:
@@ -75,4 +75,6 @@ test:
 		test/helpers.test.js \
 		test/native-host.test.js \
 		test/plaintext.test.js \
-		test/schema.test.js
+		test/schema.test.js \
+		test/selectors.test.js \
+		test/targets.test.js
