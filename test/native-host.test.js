@@ -216,7 +216,7 @@ async function installMainScript(env) {
 // Bootstrap script tests
 // ---------------------------------------------------------------------------
 
-describe("bootstrap script", () => {
+describe("Bootstrap script", () => {
     test("sends bootstrap message on startup", async () => {
         const env = createTestEnv();
         const { proc, read } = spawnBootstrap(env);
@@ -415,7 +415,7 @@ function action_test_override() {
 // Main host script tests (via bootstrap install)
 // ---------------------------------------------------------------------------
 
-describe("main host script actions", () => {
+describe("Main host script", () => {
     test("action_configure returns config with passdir and rules", async () => {
         const env = createTestEnv();
         const { proc, read, send } = await installMainScript(env);
