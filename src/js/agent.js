@@ -6,7 +6,7 @@ import { Helpers } from "./helpers.js";
  * Main agent class
  * @since 0.1.0
  */
-new (class Agent extends EventTarget {
+export class Agent extends EventTarget {
     #connectedNative = false;
     #config;
     #host;
@@ -530,4 +530,9 @@ new (class Agent extends EventTarget {
         }
         return hostname;
     }
-})();
+}
+
+// Instantiate the singleton agent in browser contexts, but not during tests.
+if (typeof chrome !== "undefined" && chrome.runtime) {
+    new Agent();
+}
