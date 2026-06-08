@@ -7,8 +7,14 @@ import { Agent } from "../src/js/agent.js";
 const noopConsole = { log() {}, error() {}, warn() {}, info() {} };
 let realConsole;
 
-function flushMicrotasks() {
-    return new Promise((resolve) => queueMicrotask(resolve));
+/**
+ * Yield to the event loop until the entire microtask queue is drained.
+ *
+ * A macrotask (setTimeout) only executes after the event loop has emptied
+ * the *entire* microtask queue, including all chained promise resolutions.
+ */
+function settleAsync() {
+    return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function once(emitter, event) {
@@ -75,7 +81,7 @@ beforeEach(async () => {
     mock.installChrome();
     mock.installFetch();
     agent = new Agent();
-    await flushMicrotasks();
+    await settleAsync();
 
     handler = installNativeHandler(mock, (msg) => {
         if (msg.action === "install") return { success: true, message: "installed" };
@@ -98,7 +104,7 @@ afterEach(() => {
 describe("Agent", () => {
     test("unauthorised popup", async () => {
         const popup = mock.chrome.runtime.connect({ name: "popup" });
-        await flushMicrotasks();
+        await settleAsync();
         const errPromise = nextMessage(popup, "error");
         popup.postMessage({ action: "match", url: "https://example.com" });
         const err = await errPromise;
@@ -107,11 +113,11 @@ describe("Agent", () => {
 
     test("single-use token auth", async () => {
         const authPort = mock.chrome.runtime.connect({ name: "auth" });
-        await flushMicrotasks();
+        await settleAsync();
         authPort.postMessage("single-secret-token");
 
         const popup = mock.chrome.runtime.connect({ name: "popup" });
-        await flushMicrotasks();
+        await settleAsync();
         popup.postMessage({ action: "auth", token: "single-secret-token", tab: { id: 1 } });
         const matchPromise = nextMessage(popup, "match");
         popup.postMessage({ action: "match", url: "https://example.com" });
@@ -120,7 +126,7 @@ describe("Agent", () => {
 
         // Second attempt with same token should fail (single-use deleted)
         const popup2 = mock.chrome.runtime.connect({ name: "popup" });
-        await flushMicrotasks();
+        await settleAsync();
         const errPromise = nextMessage(popup2, "error");
         popup2.postMessage({ action: "match", url: "https://example.com" });
         const err = await errPromise;
@@ -129,7 +135,7 @@ describe("Agent", () => {
 
     test("broadcast token", async () => {
         const popup = mock.chrome.runtime.connect({ name: "popup" });
-        await flushMicrotasks();
+        await settleAsync();
         popup.postMessage({ action: "auth", token: "broadcast", tab: { id: 1 } });
         const matchPromise = nextMessage(popup, "match");
         popup.postMessage({ action: "match", url: "https://example.com" });
@@ -140,7 +146,7 @@ describe("Agent", () => {
 
     test("search filters entries", async () => {
         const popup = mock.chrome.runtime.connect({ name: "popup" });
-        await flushMicrotasks();
+        await settleAsync();
         popup.postMessage({ action: "auth", token: "broadcast", tab: { id: 1 } });
         const matchPromise = nextMessage(popup, "match");
         popup.postMessage({ action: "match", url: "https://example.com", search: "nomatch" });
@@ -151,10 +157,10 @@ describe("Agent", () => {
     test("not connected to native host", async () => {
         const nativePort = mock.getNativePort("com.github.erayd.parcel");
         nativePort.caller.disconnect();
-        await flushMicrotasks();
+        await settleAsync();
 
         const popup = mock.chrome.runtime.connect({ name: "popup" });
-        await flushMicrotasks();
+        await settleAsync();
         popup.postMessage({ action: "auth", token: "broadcast", tab: { id: 1 } });
         const errPromise = nextMessage(popup, "error");
         popup.postMessage({ action: "match", url: "https://example.com" });
@@ -164,7 +170,7 @@ describe("Agent", () => {
 
     test("integration config", async () => {
         const integration = mock.chrome.runtime.connect({ name: "integration", sender: { frameId: 2 } });
-        await flushMicrotasks();
+        await settleAsync();
         const cfgPromise = nextMessage(integration, "config");
         integration.postMessage({ action: "config" });
         const cfg = await cfgPromise;
@@ -173,7 +179,7 @@ describe("Agent", () => {
 
     test("sha256", async () => {
         const integration = mock.chrome.runtime.connect({ name: "integration" });
-        await flushMicrotasks();
+        await settleAsync();
         const digestPromise = nextMessage(integration, "sha256-digest");
         integration.postMessage({ action: "sha256", value: "hello" });
         const digest = await digestPromise;
@@ -182,7 +188,7 @@ describe("Agent", () => {
 
     test("decrypt", async () => {
         const integration = mock.chrome.runtime.connect({ name: "integration" });
-        await flushMicrotasks();
+        await settleAsync();
         const plaintextPromise = nextMessage(integration, "plaintext");
         integration.postMessage({ action: "decrypt", path: "test/site", intent: "fill", origin: "https://example.com" });
         const pt = await plaintextPromise;
@@ -191,7 +197,7 @@ describe("Agent", () => {
 
     test("trigger relay", async () => {
         const trigger = mock.chrome.runtime.connect({ name: "trigger", sender: { tab: { id: 7, url: "https://example.com" } } });
-        await flushMicrotasks();
+        await settleAsync();
         const top = mock.findTabPort(7, 0);
         assert.ok(top, "top port");
         const relayPromise = nextMessage(top, "open-popup");
@@ -210,14 +216,14 @@ describe("Agent", () => {
     test("bridge without tab disconnects", async () => {
         const bridge = mock.chrome.runtime.connect({ name: "popup-bridge:tok:0", sender: { tab: null } });
         const disconnected = new Promise((resolve) => bridge.onDisconnect.addListener(resolve));
-        await flushMicrotasks();
+        await settleAsync();
         await disconnected;
         assert.ok(true, "no-tab disconnect");
     });
 
     test("bridge disconnect tears down both sides", async () => {
         const bridge = mock.chrome.runtime.connect({ name: "popup-bridge:tok:0", sender: { tab: { id: 3, url: "https://x.com" } } });
-        await flushMicrotasks();
+        await settleAsync();
         const receiver = mock.findTabPort(3, 0);
         let a = false,
             b = false;
@@ -245,7 +251,7 @@ describe("Agent initialisation failures", () => {
         scopedMock.installChrome();
         scopedMock.installFetch();
         scopedAgent = new Agent();
-        await flushMicrotasks();
+        await settleAsync();
     });
 
     afterEach(() => {
