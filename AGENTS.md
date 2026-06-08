@@ -1,4 +1,4 @@
-# Parcel Copilot Instructions
+# Parcel AI Agent Instructions
 
 ## Build, test, and lint commands
 
