@@ -24,7 +24,7 @@ clean:
 chrome: extension
 	rsync -av src/dist/ chrome/
 	# Always inject the Chrome extension key for unpacked/local installs
-	jq ".key=\"MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAted7WSl3dHs767uh16stdYaXCOXv3XGcWokWsDd56svrU6zhTrEzBkZGozMdqOygDBfZQ6eaRKlR4vHu/7tny1Z3f/rRO7c9dSk6pQjF/gNmsfNd4XyrtujRmPiPwi3Gcyn1Sizpkhn+Bfp3gvim/jLkqpZu9rOgSMxZOaqLOs2SSdaOr9dWhqV5eo6el5D/diL6HDzzMbgUr8NxePQ1PnZnoX1Qjms/jIfxpeEYZeaEjFNCQJKffK/zZWs8CD+mTEbJALYxwuMNueKsie2J07buyW1ZTtczeei45MDQc6yY0C7lcqhk+/7nqnJZfdkc0g1fNvTPXwzGxhFr+bpfZwIDAQAB\"" src/dist/manifest.json > chrome/manifest.json
+	#jq ".key=\"MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAted7WSl3dHs767uh16stdYaXCOXv3XGcWokWsDd56svrU6zhTrEzBkZGozMdqOygDBfZQ6eaRKlR4vHu/7tny1Z3f/rRO7c9dSk6pQjF/gNmsfNd4XyrtujRmPiPwi3Gcyn1Sizpkhn+Bfp3gvim/jLkqpZu9rOgSMxZOaqLOs2SSdaOr9dWhqV5eo6el5D/diL6HDzzMbgUr8NxePQ1PnZnoX1Qjms/jIfxpeEYZeaEjFNCQJKffK/zZWs8CD+mTEbJALYxwuMNueKsie2J07buyW1ZTtczeei45MDQc6yY0C7lcqhk+/7nqnJZfdkc0g1fNvTPXwzGxhFr+bpfZwIDAQAB\"" src/dist/manifest.json > chrome/manifest.json
 
 .PHONY: firefox
 firefox: extension
