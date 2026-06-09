@@ -76,7 +76,7 @@ test-modules:
 
 .PHONY: test-application
 test-application:
-	node --test test/agent.test.js test/integration.test.js
+	node --test test/agent.test.js test/integration.test.js test/popup.test.js
 
 .PHONY: test
 test:
@@ -90,4 +90,5 @@ test:
 		test/targets.test.js \
 		test/shadow.test.js \
 		test/agent.test.js \
-		test/integration.test.js
+		test/integration.test.js \
+		test/popup.test.js

@@ -22,9 +22,15 @@ export function createChromeMock(opts = {}) {
 
     function _makeEvent() {
         const listeners = new Set();
+        const buffer = [];
         return {
             addListener(fn) {
+                const wasEmpty = listeners.size === 0;
                 listeners.add(fn);
+                if (wasEmpty) {
+                    for (const args of buffer) fn(...args);
+                    buffer.length = 0;
+                }
             },
             removeListener(fn) {
                 listeners.delete(fn);
@@ -33,7 +39,11 @@ export function createChromeMock(opts = {}) {
                 return listeners.has(fn);
             },
             _fire(...args) {
-                for (const fn of listeners) fn(...args);
+                if (listeners.size === 0) {
+                    buffer.push(args);
+                } else {
+                    for (const fn of listeners) fn(...args);
+                }
             },
             _count() {
                 return listeners.size;
@@ -199,6 +209,11 @@ export function createChromeMock(opts = {}) {
     // fetch mock registry: url -> response body (string)
     const fetchResponses = new Map();
 
+    // clipboard mock: default no-op, tests can override writeText
+    const clipboard = {
+        async writeText() {},
+    };
+
     return Object.freeze({
         chrome,
 
@@ -247,6 +262,28 @@ export function createChromeMock(opts = {}) {
         /** Install the chrome object into `globalThis.chrome`. */
         installChrome() {
             globalThis.chrome = chrome;
+        },
+
+        /** Install navigator.clipboard and ResizeObserver stubs into `globalThis`. */
+        installBrowserPolyfills() {
+            if (!globalThis.navigator) globalThis.navigator = {};
+            Object.defineProperty(globalThis.navigator, "clipboard", {
+                value: clipboard,
+                configurable: true,
+                writable: true,
+            });
+            if (!globalThis.ResizeObserver) {
+                globalThis.ResizeObserver = class ResizeObserver {
+                    observe() {}
+                    unobserve() {}
+                    disconnect() {}
+                };
+            }
+        },
+
+        /** Direct access to the clipboard mock for test inspection. */
+        get clipboard() {
+            return clipboard;
         },
     });
 }
