@@ -64,23 +64,23 @@ endif
 
 .PHONY: test-native
 test-native:
-	node test/native-host.test.js
+	node --test $(TEST_FLAGS) test/native-host.test.js
 
 .PHONY: test-browser-mock
 test-browser-mock:
-	node --test test/chrome-api-mock.test.js
+	node --test $(TEST_FLAGS) test/chrome-api-mock.test.js
 
 .PHONY: test-modules
 test-modules:
-	node --test test/helpers.test.js test/plaintext.test.js test/schema.test.js test/selectors.test.js test/targets.test.js test/shadow.test.js
+	node --test $(TEST_FLAGS) test/helpers.test.js test/plaintext.test.js test/schema.test.js test/selectors.test.js test/targets.test.js test/shadow.test.js
 
 .PHONY: test-application
 test-application:
-	node --test test/agent.test.js test/integration.test.js test/popup.test.js
+	node --test $(TEST_FLAGS) test/agent.test.js test/integration.test.js test/popup.test.js
 
 .PHONY: test
 test:
-	node --test \
+	node --test $(TEST_FLAGS) \
 		test/chrome-api-mock.test.js \
 		test/helpers.test.js \
 		test/native-host.test.js \

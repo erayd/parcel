@@ -23,4 +23,4 @@ jobs:
         run: npm install jsdom prettier
 
       - name: Run tests
-        run: make test
+        run: make test TEST_FLAGS=--test-force-exit
