@@ -10,7 +10,7 @@
 | Format source | `make prettier` | Formats `test/*.{js,json}` and then runs `make -C src prettier`, which writes all `src/**/*.{js,json,less,css,html,xhtml}`. |
 | Clean generated artifacts | `make clean` | Removes `src/dist/`, `chrome/`, `firefox/`, and top-level `dist/`. |
 | Run all tests | `make test` | Runs the full test suite with `node --test` across all `test/*.test.js` files (browser mock, helpers, native host, plaintext, schema, selectors, targets). |
-| Run individual test groups | `make test-native`, `make test-browser-mock`, `make test-modules` | Native-host integration tests; Chrome-API mock tests; shared-module unit tests respectively. |
+| Run individual test groups | `make test-native`, `make test-browser-mock`, `make test-modules`, `make test-application` | Native-host integration tests; Chrome-API mock tests; shared-module unit tests; application tests respectively. |
 
 Do not use `src/publicsuffix` as Parcel test guidance unless the task explicitly targets that vendored subtree.
 
