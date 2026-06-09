@@ -163,6 +163,7 @@ function createMessageReader(stream) {
 function spawnBootstrap(env) {
     const proc = spawn("bash", ["./parcel-host"], {
         cwd: process.cwd(),
+        stdio: ["pipe", "pipe", "pipe"],
         env: {
             ...process.env,
             HOME: env.home,
