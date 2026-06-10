@@ -10,7 +10,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert";
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, chmodSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, chmodSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -80,6 +80,19 @@ VALID_SIGNERS="${knownSigner}"
     writeFileSync(join(passdir, "another-entry.gpg"), "encrypted-b");
     mkdirSync(join(passdir, "subfolder"), { recursive: true });
     writeFileSync(join(passdir, "subfolder", "nested.gpg"), "encrypted-c");
+
+    // Symlinked directory outside the password store
+    const outsideDir = join(home, "outside-store");
+    mkdirSync(outsideDir, { recursive: true });
+    writeFileSync(join(outsideDir, "symlinked-entry.gpg"), "encrypted-d");
+    mkdirSync(join(outsideDir, "symlinked-sub"), { recursive: true });
+    writeFileSync(join(outsideDir, "symlinked-sub", "deep.gpg"), "encrypted-e");
+    // Symlink the entire directory into the password store
+    const linkTarget = join(passdir, "symlinked-dir");
+    // Use Node's symlinkSync with type 'dir' for cross-platform compatibility
+    // On Unix, type defaults to 'file', but for directories we don't strictly
+    // need to specify it - the OS resolves it correctly.
+    symlinkSync(outsideDir, linkTarget);
 
     return {
         home,
@@ -484,9 +497,15 @@ VALID_SIGNERS="${env.knownSigner}"
             send({ action: "list" });
             const msg = await read();
             assert.ok(Array.isArray(msg.data), `Expected array, got: ${JSON.stringify(msg.data)}`);
-            assert.strictEqual(msg.data.length, 3);
+            assert.strictEqual(msg.data.length, 5);
             const names = msg.data.map((e) => e.name).sort();
-            assert.deepStrictEqual(names, ["another-entry", "subfolder/nested", "test-entry"]);
+            assert.deepStrictEqual(names, [
+                "another-entry",
+                "subfolder/nested",
+                "symlinked-dir/symlinked-entry",
+                "symlinked-dir/symlinked-sub/deep",
+                "test-entry",
+            ]);
         } finally {
             proc.kill();
             env.cleanup();
@@ -504,6 +523,25 @@ VALID_SIGNERS="${env.knownSigner}"
             send({ action: "decrypt", path: testPath, intent: "test", origin: "test-origin" });
             const msg = await read();
             assert.strictEqual(msg.data?.plaintext, "test-decrypted-content");
+        } finally {
+            proc.kill();
+            env.cleanup();
+        }
+    });
+
+    test("action_list includes symlinked directory entries and allows decrypt", async () => {
+        const env = createTestEnv();
+        const { proc, read, send } = await installMainScript(env);
+        try {
+            send({ action: "list" });
+            const msg = await read();
+            const entries = msg.data;
+            const symlinked = entries.find((e) => e.name === "symlinked-dir/symlinked-entry");
+            assert.ok(symlinked, `Expected symlinked-dir/symlinked-entry in ${JSON.stringify(entries.map((e) => e.name))}`);
+
+            send({ action: "decrypt", path: symlinked.path, intent: "test", origin: "test-origin" });
+            const decryptMsg = await read();
+            assert.strictEqual(decryptMsg.data?.plaintext, "test-decrypted-content");
         } finally {
             proc.kill();
             env.cleanup();
