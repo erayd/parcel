@@ -51,6 +51,7 @@ function load_config() {
 function update_config() {
     if [[ ! -f "$PARCELFILE" || -f "$PARCELFILE" && "$CONFIG_MODIFIED" -ne "$(get_mtime "$PARCELFILE")" ]]; then
         load_config
+        action_list >/dev/null
     fi
 }
 
