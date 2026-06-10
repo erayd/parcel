@@ -547,9 +547,7 @@
                 p.remove();
             }, 10000);
         } else if (msg.action === "clear-errors") {
-            const selector = msg.hasOwnProperty("category")
-                ? `p.error.error-category-${msg.category}`
-                : "p.error";
+            const selector = msg.hasOwnProperty("category") ? `p.error.error-category-${msg.category}` : "p.error";
             document.querySelectorAll(selector).forEach((el) => {
                 if (el._errorTimer) clearTimeout(el._errorTimer);
                 el.remove();
