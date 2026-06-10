@@ -69,7 +69,7 @@ function action_changes_since() {
         parcel_error "Invalid timestamp: $SINCE"
     fi
     SINCE="$(date -d "$SINCE" +'%Y-%m-%d %H:%M:%S' 2>/dev/null || date -j -f "%s" "$SINCE" +'%Y-%m-%d %H:%M:%S')"
-    CHANGES=$(find "$PASSWORD_STORE_DIR" \( -type d -name '.git' -prune \) -o \( -type d -not -path "$PASSWORD_STORE_DIR/.*" -not -path "$PASSWORD_STORE_DIR/**/.*" -newermt "$SINCE" -print \) | wc -l)
+    CHANGES=$(find -L "$PASSWORD_STORE_DIR" \( -type d -name '.git' -prune \) -o \( -type d -not -path "$PASSWORD_STORE_DIR/.*" -not -path "$PASSWORD_STORE_DIR/**/.*" -newermt "$SINCE" -print \) | wc -l)
     parcel_send "$(jq -n --arg changes "$CHANGES" '{changes: ($changes|gsub("\\s+"; "")|tonumber)}')"
 }
 
@@ -77,7 +77,7 @@ function action_changes_since() {
 function action_list() {
     update_config
     local OUT="$(
-        find "$PASSWORD_STORE_DIR" \( -type d -name '.git' -prune \) -o \( \( -type f -o -type l \) -not -path "$PASSWORD_STORE_DIR/.*" -not -path "$PASSWORD_STORE_DIR/**/.*" -name '*.gpg' -print \) |
+        find -L "$PASSWORD_STORE_DIR" \( -type d -name '.git' -prune \) -o \( \( -type f -o -type l \) -not -path "$PASSWORD_STORE_DIR/.*" -not -path "$PASSWORD_STORE_DIR/**/.*" -name '*.gpg' -print \) |
             jq -nR '.entries=[inputs | select(length > 0)]' |
             jq -s '
                 .[0] * .[1]
