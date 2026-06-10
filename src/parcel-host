@@ -76,9 +76,26 @@ function action_changes_since() {
 # get a list of all the password entries which match the config
 function action_list() {
     update_config
-    local FIND_OUT="$(
-        find -L "$PASSWORD_STORE_DIR" \( -type d -name '.git' -prune \) -o \( \( -type f -o -type l \) -not -path "$PASSWORD_STORE_DIR/.*" -not -path "$PASSWORD_STORE_DIR/**/.*" -name '*.gpg' -print \) 2> >(while IFS= read -r line; do printf '[WARNING action_list] %s\n' "$line" >&5; done)
+    local MIXED="$(
+        {
+            find -L "$PASSWORD_STORE_DIR" \( -type d -name '.git' -prune \) -o \( \( -type f -o -type l \) -not -path "$PASSWORD_STORE_DIR/.*" -not -path "$PASSWORD_STORE_DIR/**/.*" -name '*.gpg' -print \)
+        } 2>&1 || true
     )"
+    local FIND_OUT=""
+    local FIND_ERR=""
+    while true; do
+        IFS= read -r line <<< "" || break
+        IFS= read -r line || break
+        if [[ "$line" == "find:"* ]]; then
+            FIND_ERR+="$line"$'\n'
+        else
+            FIND_OUT+="$line"$'\n'
+        fi
+    done <<< "$MIXED"
+    if [ -n "$FIND_ERR" ]; then
+        parcel_error "Unable to scan files: $FIND_ERR"
+        return 0
+    fi
     local OUT="$(
         echo "$FIND_OUT" |
             jq -nR '.entries=[inputs | select(length > 0)]' |
