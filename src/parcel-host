@@ -69,7 +69,7 @@ function action_changes_since() {
     fi
     SINCE="$(date -d "$SINCE" +'%Y-%m-%d %H:%M:%S' 2>/dev/null || date -j -f "%s" "$SINCE" +'%Y-%m-%d %H:%M:%S')"
     CHANGES=$(find "$PASSWORD_STORE_DIR" \( -type d -name '.git' -prune \) -o \( -type d -not -path "$PASSWORD_STORE_DIR/.*" -not -path "$PASSWORD_STORE_DIR/**/.*" -newermt "$SINCE" -print \) | wc -l)
-    parcel_send "$(jq -n --arg changes "$CHANGES" '{changes: ($changes|trim|tonumber)}')"
+    parcel_send "$(jq -n --arg changes "$CHANGES" '{changes: ($changes|gsub("\\s+"; "")|tonumber)}')"
 }
 
 # get a list of all the password entries which match the config
