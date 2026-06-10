@@ -213,6 +213,12 @@ Example `.parcel.json`:
 
 ---
 
+## Contributing
+
+We welcome contributions! Please see [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution guidelines.
+
+---
+
 ## License
 
 Parcel is released under the [ISC License](LICENSE.md).

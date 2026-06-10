@@ -9,9 +9,10 @@ Please ensure that you are familiar with the [project constitution][1]. In order
 ### Prerequisites
 
 - **Node.js** (for running tests)
-  - **Prettier** (`npm install -g prettier` or use your package manager)
-  - **JSDom** (`npm install -g jsdom` or use your package manager)
-- **jq**, **gpg** (required by the native host)
+  - **Prettier** (`npm install` or use your package manager)
+  - **JSDom** (`npm install` or use your package manager)
+- **jq** >= 1.5
+- **gpg** >= 2.2.20
 - A valid GPG key for signing commits
 
 ### Building
@@ -63,7 +64,7 @@ make prettier
 
 ## Testing
 
-In addition to the automated test suite, please ensure that your changes are thoroughly human-tested in both Chrome and Firefox.
+In addition to the automated test suite, please ensure that your changes are thoroughly human-tested in both Chrome and Firefox. Contributions that do not pass the full test suite will not be accepted.
 
 The following automated tests are available using Node.js's built-in `node:test` runner:
 
@@ -79,6 +80,12 @@ make test-browser-mock
 
 # run the extension module tests only
 make test-modules
+
+# run the application-level tests only
+make test-application
+
+# run syntax tests only
+make test-syntax
 ```
 
 ## Submitting Changes
