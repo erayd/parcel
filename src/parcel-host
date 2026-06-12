@@ -197,7 +197,7 @@ function check_decrypt_rate_limit() {
         RATE=$DECRYPT_BUCKET_RATE_DEFAULT
     fi
     # rate limiting disabled when bucket or rate is zero
-    if [ "$BUCKET_SIZE" -eq 0 ] || [ "$(printf '%.6f' "$RATE" | sed 's/^-//' | sed 's/^0*$//' | sed 's/^\./0./' | grep -qx '0.0*')" ]; then
+    if [ "$BUCKET_SIZE" -eq 0 ] || awk -v rate="$RATE" 'BEGIN { exit !(rate == 0) }'; then
         return 0
     fi
 
