@@ -184,6 +184,8 @@ The `rules` array controls which password-store entries Parcel can see. Rules ar
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
+| `allowLinks` | boolean | `false` | If `true`, includes symlinked password entries in the entry list. |
+| `allowExternalLinks` | boolean | `false` | If `true` (and `allowLinks` is also `true`), includes symlinks that point outside the password store directory. |
 | `auditDecrypt` | boolean | `false` | If `true`, logs every decryption attempt (success or failure) to the host log file. |
 | `cacheTTL` | number | `10` | Seconds the extension caches the entry list before re-querying the host. |
 | `decryptTimeout` | number | `60` | Seconds before a decryption request is aborted. |
