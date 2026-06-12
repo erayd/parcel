@@ -685,6 +685,70 @@ VALID_SIGNERS="${env.knownSigner}"
         }
     });
 
+    test("action_decrypt revalidates symlink scope at decrypt time", async () => {
+        const env = createTestEnv();
+        const parcelJson = join(env.passdir, ".parcel.json");
+        writeFileSync(parcelJson, JSON.stringify({ rules: [{ pattern: "." }], allowLinks: true, allowExternalLinks: false }));
+
+        const { proc, read, send } = await installMainScript(env);
+        try {
+            send({ action: "list" });
+            await read();
+
+            const linkPath = join(env.passdir, "internal-link.gpg");
+            const outsideFile = join(env.home, "outside-file.gpg");
+            writeFileSync(outsideFile, "encrypted-outside");
+
+            // Retarget the internal symlink to an external file
+            rmSync(linkPath);
+            symlinkSync(outsideFile, linkPath);
+
+            send({ action: "decrypt", path: linkPath, intent: "test", origin: "test-origin" });
+            const msg = await read();
+            assert.ok(
+                msg.error?.toLowerCase().includes("access denied") ||
+                    msg.error?.toLowerCase().includes("scope") ||
+                    msg.error?.toLowerCase().includes("violation"),
+                `Expected access denied for retargeted symlink, got: ${JSON.stringify(msg)}`,
+            );
+        } finally {
+            proc.kill();
+            env.cleanup();
+        }
+    });
+
+    test("action_decrypt revalidates link policy when a regular file is replaced by a symlink", async () => {
+        const env = createTestEnv();
+        const parcelJson = join(env.passdir, ".parcel.json");
+        writeFileSync(parcelJson, JSON.stringify({ rules: [{ pattern: "." }], allowLinks: false }));
+
+        const { proc, read, send } = await installMainScript(env);
+        try {
+            send({ action: "list" });
+            await read();
+
+            const filePath = join(env.passdir, "test-entry.gpg");
+            const outsideFile = join(env.home, "outside-file.gpg");
+            writeFileSync(outsideFile, "encrypted-outside");
+
+            // Replace the regular file with a symlink to an external file
+            rmSync(filePath);
+            symlinkSync(outsideFile, filePath);
+
+            send({ action: "decrypt", path: filePath, intent: "test", origin: "test-origin" });
+            const msg = await read();
+            assert.ok(
+                msg.error?.toLowerCase().includes("access denied") ||
+                    msg.error?.toLowerCase().includes("scope") ||
+                    msg.error?.toLowerCase().includes("violation"),
+                `Expected access denied for file replaced by symlink, got: ${JSON.stringify(msg)}`,
+            );
+        } finally {
+            proc.kill();
+            env.cleanup();
+        }
+    });
+
     test("action_decrypt audits on success", async () => {
         const env = createTestEnv();
         // Enable auditing

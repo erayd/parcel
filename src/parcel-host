@@ -229,6 +229,45 @@ function check_decrypt_rate_limit() {
     return 0
 }
 
+function path_is_within() {
+    local PARENT="$1"
+    local CHILD="$2"
+    [ "$CHILD" = "$PARENT" ] || [[ "$CHILD" == "$PARENT/"* ]]
+}
+
+function path_uses_links() {
+    local FILE_PATH="$1"
+    local CURRENT="$FILE_PATH"
+    while [ "$CURRENT" != "$PASSWORD_STORE_DIR" ] && [ "$CURRENT" != "/" ]; do
+        if [ -L "$CURRENT" ]; then
+            return 0
+        fi
+        CURRENT="$(dirname "$CURRENT")"
+    done
+    [ -L "$PASSWORD_STORE_DIR" ]
+}
+
+function validate_decrypt_path_policy() {
+    local FILE_PATH="$1"
+    if ! path_uses_links "$FILE_PATH"; then
+        return 0
+    fi
+    local ALLOW_LINKS="$(jq -r '.allowLinks' <<< "$CONFIG")"
+    if [ "$ALLOW_LINKS" != "true" ]; then
+        return 1
+    fi
+    local REAL_PATH
+    if ! REAL_PATH="$(readlink -f "$FILE_PATH" 2>/dev/null)"; then
+        return 1
+    fi
+    local REAL_PASSDIR="$(jq -r '.realPassdir' <<< "$CONFIG")"
+    if path_is_within "$REAL_PASSDIR" "$REAL_PATH"; then
+        return 0
+    fi
+    local ALLOW_EXTERNAL_LINKS="$(jq -r '.allowExternalLinks' <<< "$CONFIG")"
+    [ "$ALLOW_EXTERNAL_LINKS" = "true" ]
+}
+
 # decrypt and return the contents of a password entry
 function action_decrypt() {
     update_config
@@ -256,6 +295,11 @@ function action_decrypt() {
     if [ ! -f "$FILE_PATH" ]; then
         audit_decrypt "$FILE_PATH" "File not found" "$INTENT" "$ORIGIN"
         parcel_error "File not found: $FILE_PATH"
+        return 0
+    fi
+    if ! validate_decrypt_path_policy "$FILE_PATH"; then
+        audit_decrypt "$FILE_PATH" "Denied (path out of scope)" "$INTENT" "$ORIGIN"
+        parcel_error "Access Denied: Path out of scope: $FILE_PATH"
         return 0
     fi
     if ! OUT="$(gpg --decrypt --quiet --batch --no-tty --yes < "$FILE_PATH" 2>/dev/null)"; then
