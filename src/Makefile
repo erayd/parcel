@@ -14,6 +14,8 @@ DIST_FILES := \
     img/logo-64.png \
     img/logo-128.png \
     img/icon-copy.svg \
+    img/icon-history-nuke.svg \
+    img/icon-show-details.svg \
     js/agent.js \
     js/helpers.js \
     js/integration.js \

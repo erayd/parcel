@@ -463,7 +463,6 @@
                     if (he.path === (await sha256(entry.path))) {
                         const historyButton = document.createElement("button");
                         historyButton.classList.add("historyNuke");
-                        historyButton.textContent = "X";
                         historyButton.setAttribute("title", "Forget this entry");
                         historyButton.addEventListener("click", (ev) => {
                             ev.stopPropagation();
@@ -488,7 +487,6 @@
 
                 const button = document.createElement("button");
                 button.classList.add("detail");
-                button.textContent = ">";
                 button.setAttribute("title", "Show detailed content");
                 button.addEventListener("click", (ev) => {
                     ev.stopPropagation();
