@@ -3,6 +3,9 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="preload" href="/css/fonts.css" as="style" />
+        <link rel="preload" href="/ttf/Roboto-VariableFont_wdth,wght.ttf" as="font" type="font/ttf" crossorigin />
+        <link rel="preload" href="/ttf/NotoSansMono-VariableFont_wdth,wght.ttf" as="font" type="font/ttf" crossorigin />
         <link rel="modulepreload" href="/js/helpers.js" />
         <link rel="modulepreload" href="/js/plaintext.js" />
         <script src="/js/popup.js" type="module" defer></script>
@@ -12,9 +15,11 @@
     <body>
         <template id="parcel-detail-template">
             <style>
+                @import url("/css/fonts.css");
                 :host {
                     background-color: var(--color-modal-bg);
                     color: var(--color-modal-text);
+                    font-family: Roboto, Calibri, sans-serif;
                 }
                 div,
                 parcel-value {
@@ -30,10 +35,12 @@
         </template>
         <template id="parcel-value-template">
             <style>
+                @import url("/css/fonts.css");
                 :host {
                     align-items: center;
                     color: var(--color-modal-text);
                     display: flex;
+                    font-family: Roboto, Calibri, sans-serif;
                     & > * {
                         padding: 5px;
                     }
@@ -50,6 +57,7 @@
                         width: 68px;
                     }
                     &.char {
+                        font-family: "Noto Sans Mono", monospace;
                         &.punct {
                             color: var(--color-modal-highlight-1);
                         }
@@ -87,10 +95,12 @@
         </template>
         <template id="parcel-plaintext-line-template">
             <style>
+                @import url("/css/fonts.css");
                 :host {
                     border-bottom: 1px solid var(--color-modal-item-focus);
                     display: flex;
                     align-items: center;
+                    font-family: Roboto, Calibri, sans-serif;
                     gap: 10px;
                 }
                 :host(:last-child) {
@@ -99,6 +109,8 @@
                 .line {
                     flex-grow: 1;
                     display: inline-flex;
+                    font-family: "Noto Sans Mono", monospace;
+                    font0size: 0.85em;
                     gap: 5px;
                     overflow: hidden;
                     white-space: nowrap;

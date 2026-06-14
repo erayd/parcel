@@ -1,0 +1,18 @@
+@font-face {
+    font-family: "Roboto";
+    src: url("/ttf/Roboto-VariableFont_wdth,wght.ttf") format("truetype");
+    font-weight: 300;
+    font-style: normal;
+}
+@font-face {
+    font-family: "Roboto Light";
+    src: url("/ttf/Roboto-VariableFont_wdth,wght.ttf") format("truetype");
+    font-weight: 200;
+    font-style: normal;
+}
+@font-face {
+    font-family: "Noto Sans Mono";
+    src: url("/ttf/NotoSansMono-VariableFont_wdth,wght.ttf") format("truetype");
+    font-weight: 300;
+    font-style: normal;
+}

@@ -4,6 +4,7 @@ DIST_FILES := \
     manifest.json \
     parcel-host \
     parcel-host.asc \
+	css/fonts.css \
     css/popup.css \
     html/popup.html \
     img/logo.svg \
@@ -23,6 +24,9 @@ DIST_FILES := \
     js/selectors.js \
     js/shadow.js \
     js/targets.js \
+	ttf/NotoSans-VariableFont_wdth,wght.ttf \
+	ttf/NotoSansMono-VariableFont_wdth,wght.ttf \
+	ttf/Roboto-VariableFont_wdth,wght.ttf \
 
 .PHONY: default
 default: prettier dist
@@ -64,6 +68,10 @@ dist/img/%: img/%
 	install -m 644 -D ./$< ./$@
 
 dist/js/%.js: js/%.js
+	install -m 644 -D ./$< ./$@
+
+
+dist/ttf/%.ttf: ttf/%.ttf
 	install -m 644 -D ./$< ./$@
 
 dist/public_suffix_list.dat:
