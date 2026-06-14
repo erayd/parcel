@@ -34,6 +34,7 @@ firefox: extension
 		|del(.background.service_worker) \
 		|.permissions += [\"contextualIdentities\"] \
 		|.browser_specific_settings.gecko.id=\"parcel@mozilla.org\" \
+		|.browser_specific_settings.gecko.data_collection_permissions.required=[\"none\"] \
 		|.content_scripts |= map(\
 		    if .type == \"module\" \
 		        then del(.type) | .js|=map(gsub(\".js\"; \".es6.js\")) \
