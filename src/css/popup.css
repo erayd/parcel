@@ -143,6 +143,7 @@ ul {
         .tag {
             border-radius: 0.5em;
             display: inline-block;
+            font-family: "Roboto", Calibri, sans-serif;
             padding: 0.2em 0.5em;
         }
         .name {
