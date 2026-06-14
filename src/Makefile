@@ -26,7 +26,6 @@ DIST_FILES := \
     js/selectors.js \
     js/shadow.js \
     js/targets.js \
-	ttf/NotoSans-VariableFont_wdth,wght.ttf \
 	ttf/NotoSansMono-VariableFont_wdth,wght.ttf \
 	ttf/Roboto-VariableFont_wdth,wght.ttf \
 
