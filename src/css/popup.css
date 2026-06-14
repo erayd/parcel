@@ -226,6 +226,8 @@ parcel-detail {
     z-index: 10;
 
     .context-popup & {
-        min-width: max-content;
+        /* Don't force max-content here; otherwise long lines expand the iframe
+           off-screen in the context popup. Action-popup mode is already safe
+           because the browser popup window enforces max-width: 600px. */
     }
 }
