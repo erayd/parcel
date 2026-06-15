@@ -2,6 +2,28 @@
 
 This document outlines the findings from security reviews conducted on the project, and the maintainers' responses to them.
 
+## [security-review-copilot-kimi_K2.6-20260615-293a1b2.md](reviews/security-review-copilot-kimi_K2.6-20260615-293a1b2.md)
+
+Automated security review using Copilot / Kimi K2.6, conducted on June 15, 2026 against commit 293a1b26d76510e53a89608ceb4979c47260f5f9.
+
+New findings are listed below. Existing findings from the previous review are omitted, as they are already listed in the section for that review.
+
+### Log-bloating via unbounded audit-log fields
+
+**Description:** The audit log strips control characters but does not limit the length of fields such as `FILE_PATH`, `INTENT`, or `ORIGIN`, which could allow a compromised extension to cause unbounded log growth.
+
+### No Content Security Policy declared in manifest
+
+**Description:** The extension relies on the browser's default MV3 CSP rather than an explicit declaration.
+
+### Search regex ReDoS risk in service worker
+
+**Description:** User-provided search terms are compiled as regular expressions without length limits or ReDoS checks, which could transiently hang the service worker.
+
+### `shadow.js` runs in MAIN world and patches global prototype
+
+**Description:** `shadow.js` patches `Element.prototype.attachShadow` in the page's JavaScript realm, which increases detectability and exposes a small interference surface.
+
 ## [security-review-copilot-gpt_5.4-20260614-v1.0.0.md](reviews/security-review-copilot-gpt_5.4-20260614-v1.0.0.md)
 
 Automated security review using Copilot GPT 5.4, conducted on June 14, 2026 against the v1.0.0 release.
