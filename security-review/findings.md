@@ -10,7 +10,7 @@ There are no unaddressed findings remaining from this review.
 
 ### GPG auto-import lets rejected install attempts pollute the user's keyring
 
-**Description:* `gpg --auto-key-import` pollutes the user's keyring with release keys when verifying the host signature.
+**Description:** `gpg --auto-key-import` pollutes the user's keyring with release keys when verifying the host signature.
 
 **Response:** Resolved in #46 by using a temporary keyring for signature verification.
 
