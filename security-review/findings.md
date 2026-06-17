@@ -2,6 +2,18 @@
 
 This document outlines the findings from security reviews conducted on the project, and the maintainers' responses to them.
 
+## [security-review-copilot-kimi_K2.7-20260617-d8de751.md](reviews/security-review-copilot-kimi_K2.7-20260617-d8de751.md)
+
+Automated security review using Copilot / Kimi K2.7, conducted on June 17, 2026 against commit d8de751e4fc4629f2c8e0a2cede24b63e819ade1.
+
+No security vulnerabilities were identified in this review. The review notes one low-priority hardening opportunity:
+
+### Audit-log field length caps
+
+**Description:** Audit log fields are stripped of control characters, but are not explicitly truncated to a maximum byte length. In practice the values are constrained by the caller, but an explicit cap would add defense-in-depth against accidental log bloat.
+
+**Response:** This was already addressed in #56, but GitHub seems to have lost the commit after merging. Have re-merged it manually.
+
 ## [security-review-copilot-kimi_K2.6-20260615-293a1b2.md](reviews/security-review-copilot-kimi_K2.6-20260615-293a1b2.md)
 
 Automated security review using Copilot / Kimi K2.6, conducted on June 15, 2026 against commit 293a1b26d76510e53a89608ceb4979c47260f5f9.
