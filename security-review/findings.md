@@ -1,6 +1,24 @@
 # Security Review Findings
 
-This document outlines the findings from security reviews conducted on the project, and the maintainers' responses to them.
+This document outlines the findings from security reviews conducted on the project, and the maintainers' responses to them. Duplicate findings, and findings that do not detail a security vulnerability (e.g. simply note designed behaviour as intended / acceptable) are not listed, but are still present in the full reports.
+
+## [security-review-copilot-glm_5.2-20260617-8023edb.md](reviews/security-review-copilot-glm_5.2-20260617-8023edb.md)
+
+Automated security review using Copilot GLM 5.2, conducted on June 17, 2026 against commit 8023edb68ad9fbf7bb66e90e22f4993168d9664a.
+
+Existing findings from the previous review are omitted, as they are already listed in the section for that review.
+
+### Audit-log line assembly is unbounded in the MESSAGE slot when decryption fails with a long error
+
+**Description:** The per-field length caps added in #56 bound each audit-log field individually, but the overall assembled log line is not capped. The failure-path `MESSAGE` values are host-defined constants (not attacker-controlled), and `auditDecrypt` is opt-in with rate-limited decryption gating entries, so the realistic log-growth risk is low.
+
+**Response:** This is considered acceptable. The remaining risk is very low, and any resulting pollution should not impact the usability of the log in the event of an incident.
+
+### A world or group writable `~/.config/parcel/` could be abused to replace the `0600`-permission `parcelrc`.
+
+**Description:** The bootstrap enforces that `parcelrc` has `0600` permissions, but does not verify the mode or ownership of the containing directory. On shared systems or where a misconfigured package manager created `~/.config/parcel` group/world-writable, the `0600` check could be bypassed via a rename/rename-over replacement of the file.
+
+**Response:** This is a very unlikely scenario. The finding is noted, but the only user who could achieve this and *still pass the 0600 check on `parcelrc` afterwards* is `root` (because chown `parcelrc` to the user is required, which non-`root` users cannot do). The status quo is therefore considered acceptable.
 
 ## [security-review-copilot-kimi_K2.7-20260617-d8de751.md](reviews/security-review-copilot-kimi_K2.7-20260617-d8de751.md)
 
@@ -123,3 +141,4 @@ obfuscation measuer that would give a false sense of security. Users who are con
 this operation.
 
 **Response:** Resolved in 49 by moving the sha256 setup to after `parcelrc` is loaded.
+
