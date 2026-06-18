@@ -2,6 +2,18 @@
 
 This document outlines the findings from security reviews conducted on the project, and the maintainers' responses to them. Duplicate findings, and findings that do not detail a security vulnerability (e.g. simply note designed behaviour as intended / acceptable) are not listed, but are still present in the full reports.
 
+## [security-review-copilot-gpt_5.4-20260617-8023edb.md](reviews/security-review-copilot-gpt_5.4-20260617-8023edb.md)
+
+Automated security review using Copilot GPT 5.4, conducted on June 17, 2026 against commit 8023edb68ad9fbf7bb66e90e22f4993168d9664a.
+
+This review idetified one new low-priority hardening opportunity.
+
+### `allowLinks: false` does not stop symlink traversal during host scans
+
+**Description:** The host's entry-list and cache-invalidation scans follow symlinks **before** applying the configured link policy, which could result in a DoS if a symlink within the password store points to a very large or busy directory.
+
+**Response:** Addressed in #57 by applying the link policies before running traversal operations, plus a few other tightening measures.
+
 ## [security-review-copilot-glm_5.2-20260617-8023edb.md](reviews/security-review-copilot-glm_5.2-20260617-8023edb.md)
 
 Automated security review using Copilot GLM 5.2, conducted on June 17, 2026 against commit 8023edb68ad9fbf7bb66e90e22f4993168d9664a.
