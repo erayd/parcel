@@ -60,6 +60,7 @@ endif
 	gzip -9 dist/parcel-$(VERSION).tar
 	(cd chrome && zip -r ../dist/parcel-chrome-$(VERSION).zip *)
 	(cd firefox && zip -r ../dist/parcel-firefox-$(VERSION).zip *)
+	install -m 755 -D -t dist parcel-host
 	for file in dist/*; do gpg --detach-sign --armor "$$file"; done
 
 .PHONY: test-native
