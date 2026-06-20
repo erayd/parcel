@@ -44,3 +44,11 @@ Do not use `src/publicsuffix` as Parcel test guidance unless the task explicitly
 - A more detailed overview of the security model, threat surface, and mitigations can be found in `SECURITY.md`.
 - The results of security reviews are summarised in `security-review/findings.md`, with individual reports available in the `security-review/reviews` subdirectory.
 - Agents conducting security reviews are not allowed to access the full text of prior reviews, but may access the summary in `findings.md`.
+
+## GitHub integration & use of git
+
+- Never open a new PR, even if the user requests it.
+- Never open a new issue, even if the user requests it.
+- Never push to any branch, even if the user requests it.
+- Never create new commits unless the user has explicitly requested that you do so.
+- Never stage your changes unless the user has explicitly requested that you do so.
