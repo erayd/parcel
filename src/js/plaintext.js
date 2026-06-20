@@ -1,4 +1,4 @@
-"mode strict";
+"use strict";
 
 import { Helpers } from "./helpers.js";
 
