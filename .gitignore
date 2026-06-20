@@ -1,6 +1,7 @@
 .DS_Store
 /chrome
-/firefox
 /dist
+/firefox
+/node_modules
 /src/dist
 /src/nodepass-host.asc
