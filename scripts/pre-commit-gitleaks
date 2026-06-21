@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Parcel pre-commit hook: scan staged changes for secrets with gitleaks.
+#
+# If gitleaks is not installed, it is downloaded on first run into
+#   ~/.cache/parcel-gitleaks/  (or $XDG_CACHE_HOME/parcel-gitleaks/)
+# and reused thereafter. To bypass for a specific commit, run
+#   git commit --no-verify
+#
+# Install (from repo root):
+#   ln -sf ../../scripts/pre-commit-gitleaks .git/hooks/pre-commit
+#   chmod +x scripts/pre-commit-gitleaks
+
+set -euo pipefail
+
+# --- locate repo root -------------------------------------------------------
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || {
+    echo "pre-commit-gitleaks: not inside a git repository" >&2
+    exit 1
+})"
+
+config="$repo_root/.gitleaks.toml"
+
+# --- resolve gitleaks binary ------------------------------------------------
+gitleaks_bin="$(command -v gitleaks 2>/dev/null || true)"
+
+if [[ -z "$gitleaks_bin" ]]; then
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/parcel-gitleaks"
+    gitleaks_bin="$cache_dir/gitleaks"
+
+    if [[ ! -x "$gitleaks_bin" ]]; then
+        echo "pre-commit-gitleaks: gitleaks not found on PATH; downloading..." >&2
+        mkdir -p "$cache_dir"
+
+        # Pick the asset for the host arch/os.
+        case "$(uname -s)" in
+            Linux*)  os="linux" ;;
+            Darwin*) os="darwin" ;;
+            *) echo "pre-commit-gitleaks: unsupported OS $(uname -s)" >&2; exit 1 ;;
+        esac
+        case "$(uname -m)" in
+            x86_64|amd64) arch="x64" ;;
+            arm64|aarch64) arch="arm64" ;;
+            *) echo "pre-commit-gitleaks: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+
+        # Resolve the latest release tag from the GitHub API. Write the
+        # response to a temp file first so an early-exiting pipeline cannot
+        # SIGPIPE curl (which curl treats as a hard error).
+        api_url="https://api.github.com/repos/gitleaks/gitleaks/releases/latest"
+        resp_file="$(mktemp)"
+        trap 'rm -f "$resp_file"' EXIT
+        if ! curl -fsSL "$api_url" -o "$resp_file"; then
+            echo "pre-commit-gitleaks: failed to query latest gitleaks release" >&2
+            exit 1
+        fi
+        version="$(grep -m1 '"tag_name"' "$resp_file" \
+            | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v?([^"]+)".*/\1/')"
+        rm -f "$resp_file"
+        trap - EXIT
+        if [[ -z "$version" ]]; then
+            echo "pre-commit-gitleaks: could not parse latest gitleaks version" >&2
+            exit 1
+        fi
+
+        asset="gitleaks_${version}_${os}_${arch}.tar.gz"
+        url="https://github.com/gitleaks/gitleaks/releases/download/v${version}/${asset}"
+        echo "pre-commit-gitleaks: fetching $url" >&2
+        if ! curl -fsSL "$url" | tar -xz -C "$cache_dir" gitleaks; then
+            echo "pre-commit-gitleaks: download failed" >&2
+            exit 1
+        fi
+        chmod +x "$gitleaks_bin"
+        echo "pre-commit-gitleaks: installed $version to $gitleaks_bin" >&2
+    fi
+fi
+
+# --- run gitleaks against staged changes ------------------------------------
+# `protect --staged` scans only the diff being committed. --redact keeps any
+# matched secret out of the terminal output. A non-zero exit blocks the commit.
+exec "$gitleaks_bin" protect \
+    --config "$config" \
+    --source "$repo_root" \
+    --staged \
+    --redact \
+    --verbose
