@@ -1,0 +1,21 @@
+# VCS & metadata
+.git
+.gitmodules
+.github
+
+# Node
+node_modules
+
+# Generated / build outputs
+chrome
+firefox
+dist
+src/dist
+
+# OS / editor noise
+.DS_Store
+default.profraw
+*.swp
+
+# Security-review artefacts are not needed for building
+security-review

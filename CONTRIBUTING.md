@@ -88,6 +88,18 @@ make test-application
 make test-syntax
 ```
 
+### Docker
+
+If you would prefer to test your changes in an isolated container instead of installing the test requirements on your system, you can use the provided `Dockerfile` to build an image with all necessary test dependencies pre-installed.
+
+```bash
+# Build the Docker image
+DOCKER_BUILDKIT=1 docker build -t parcel-test .
+
+# Run the full test suite in the container
+docker run --rm -v "$PWD":/parcel -it parcel-test test
+```
+
 ## Submitting Changes
 
 1. **Fork and branch** from the latest `master`.
