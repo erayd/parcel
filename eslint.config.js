@@ -50,7 +50,7 @@ export default [
             },
         },
         rules: {
-            // CONTRIBIBURING.md mandates `"use strict";` at the top of every
+            // CONTRIBUTING.md mandates `"use strict";` at the top of every
             // file; the directive is technically redundant in ES modules but
             // kept for documentation. Disable ESLint's `strict` rule, which
             // would otherwise flag and try to auto-remove the directive.
