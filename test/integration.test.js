@@ -642,6 +642,131 @@ describe("Integration script", { concurrency: false }, () => {
         assert.strictEqual(msg.width, 456);
     });
 
+    test("tab on bound target sends focus-popup", async () => {
+        clearBody();
+        const input = makeInput({ type: "password", name: "password" });
+        const triggerReceiver = portReceivers["trigger"];
+        const popupPromise = nextMessage(triggerReceiver, "trigger-popup", 3000);
+        await click(input);
+        await popupPromise;
+
+        const token = input._parcelToken;
+        assert.ok(token);
+
+        const port = mock.chrome.runtime.connect({ name: token });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const originPromise = nextMessage(port, "origin", 3000);
+        port.postMessage({ action: "ready" });
+        await originPromise;
+
+        const focusPromise = nextMessage(port, "focus-popup", 3000);
+        const ev = new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+        input.dispatchEvent(ev);
+        const msg = await focusPromise;
+
+        assert.strictEqual(msg.action, "focus-popup");
+        assert.strictEqual(ev.defaultPrevented, true);
+    });
+
+    test("focus-target message refocuses bound target", async () => {
+        clearBody();
+        const input = makeInput({ type: "password", name: "password" });
+        const button = document.createElement("button");
+        document.body.appendChild(button);
+        const triggerReceiver = portReceivers["trigger"];
+        const popupPromise = nextMessage(triggerReceiver, "trigger-popup", 3000);
+        await click(input);
+        await popupPromise;
+
+        const token = input._parcelToken;
+        assert.ok(token);
+
+        const port = mock.chrome.runtime.connect({ name: token });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const originPromise = nextMessage(port, "origin", 3000);
+        port.postMessage({ action: "ready" });
+        await originPromise;
+
+        button.focus();
+        assert.strictEqual(document.activeElement, button);
+        port.postMessage({ action: "focus-target" });
+        await settleAsync();
+
+        assert.strictEqual(document.activeElement, input);
+    });
+
+    test("input on target before popup connects closes popup", async () => {
+        clearBody();
+        const input = makeInput({ type: "password", name: "password" });
+        const triggerReceiver = portReceivers["trigger"];
+        const popupPromise = nextMessage(triggerReceiver, "trigger-popup", 3000);
+        await click(input);
+        await popupPromise;
+
+        const closePopupPromise = nextMessage(triggerReceiver, "close-popup", 3000);
+        input.value = "typed";
+        input.dispatchEvent(new window.Event("input", { bubbles: true }));
+        const msg = await closePopupPromise;
+
+        assert.strictEqual(msg.action, "close-popup");
+    });
+
+    test("input on bound target closes popup and disconnects", async () => {
+        clearBody();
+        const input = makeInput({ type: "password", name: "password" });
+        const triggerReceiver = portReceivers["trigger"];
+        const popupPromise = nextMessage(triggerReceiver, "trigger-popup", 3000);
+        await click(input);
+        await popupPromise;
+
+        const token = input._parcelToken;
+        assert.ok(token);
+
+        const port = mock.chrome.runtime.connect({ name: token });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const originPromise = nextMessage(port, "origin", 3000);
+        port.postMessage({ action: "ready" });
+        await originPromise;
+
+        const closePopupPromise = nextMessage(triggerReceiver, "close-popup", 3000);
+        input.value = "typed";
+        input.dispatchEvent(new window.Event("input", { bubbles: true }));
+        const tabEvent = new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+        input.dispatchEvent(tabEvent);
+        const msg = await closePopupPromise;
+        await settleAsync();
+
+        assert.strictEqual(msg.action, "close-popup");
+        assert.strictEqual(port.disconnected, true);
+        assert.strictEqual(tabEvent.defaultPrevented, false);
+    });
+
+    test("close message stops intercepting tab on target", async () => {
+        clearBody();
+        const input = makeInput({ type: "password", name: "password" });
+        const triggerReceiver = portReceivers["trigger"];
+        const popupPromise = nextMessage(triggerReceiver, "trigger-popup", 3000);
+        await click(input);
+        await popupPromise;
+
+        const token = input._parcelToken;
+        assert.ok(token);
+
+        const port = mock.chrome.runtime.connect({ name: token });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const originPromise = nextMessage(port, "origin", 3000);
+        port.postMessage({ action: "ready" });
+        await originPromise;
+
+        const closePopupPromise = nextMessage(triggerReceiver, "close-popup", 3000);
+        port.postMessage({ action: "close" });
+        await closePopupPromise;
+
+        const tabEvent = new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+        input.dispatchEvent(tabEvent);
+        assert.strictEqual(tabEvent.defaultPrevented, false);
+    });
+
     // -----------------------------------------------------------------------
     // broadcast
     // -----------------------------------------------------------------------

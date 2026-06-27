@@ -398,6 +398,7 @@
                 }
             }
             targetBindings[target._parcelToken] = target;
+            addTargetInputClose(target);
             authPort.postMessage(target._parcelToken);
             target.setAttribute("parcel-selector", targetInfo.selector);
             target.setAttribute("parcel-type", targetInfo.type);
@@ -416,8 +417,76 @@
         }
     }
 
+    /**
+     * Remove the input-close listener from a target element, if one is bound.
+     * @since 1.0.2
+     * @param {HTMLElement} target - The element to remove the listener from.
+     */
+    function removeTargetInputClose(target) {
+        if (!target?._parcelCloseOnInput) return;
+        target.removeEventListener("input", target._parcelCloseOnInput);
+        delete target._parcelCloseOnInput;
+    }
+
+    /**
+     * Clean up all Parcel bindings on a target element: removes the input-close listener,
+     * deletes the popup port reference, clears the focus-suspended flag, and removes the
+     * element from the target bindings map.
+     * @since 1.0.2
+     * @param {HTMLElement} target - The element to clean up.
+     * @param {chrome.runtime.Port|null} [port=null] - If provided, only cleans up if the target's bound port matches.
+     */
+    function cleanupInlineTarget(target, port = null) {
+        if (!target) return;
+        if (port && target._parcelPopupPort && target._parcelPopupPort !== port) return;
+        removeTargetInputClose(target);
+        if (!port || target._parcelPopupPort === port) delete target._parcelPopupPort;
+        delete target._parcelFocusSuspended;
+        if (target._parcelToken && target._parcelToken !== "broadcast") delete targetBindings[target._parcelToken];
+    }
+
+    /**
+     * Bind an input event listener to the target element that closes the popup and cleans
+     * up the target binding when the user starts typing.
+     * @since 1.0.2
+     * @param {HTMLElement} target - The element to bind the input-close listener to.
+     */
+    function addTargetInputClose(target) {
+        removeTargetInputClose(target);
+        target._parcelCloseOnInput = () => {
+            if (target._parcelFilling) return;
+            const popupPort = target._parcelPopupPort;
+            cleanupInlineTarget(target, popupPort);
+            triggerPort.postMessage({ action: "close-popup" });
+            popupPort?.disconnect();
+        };
+        target.addEventListener("input", target._parcelCloseOnInput);
+    }
+
+    /**
+     * Capture-phase keydown handler that intercepts Tab on popup-bound elements and
+     * redirects focus to the popup iframe. Uses `composedPath()` to find the bound element
+     * through shadow DOM boundaries. Skips interception when focus is suspended (e.g.
+     * during a blocking alert) or when the popup port is stale.
+     * @since 1.0.2
+     * @param {KeyboardEvent} ev - The keydown event.
+     */
+    function handleTargetKeydown(ev) {
+        if (ev.defaultPrevented || ev.key !== "Tab" || ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey) return;
+        const target = ev.composedPath().find((el) => el?._parcelPopupPort);
+        if (!target) return;
+        if (target._parcelFocusSuspended) return;
+        ev.preventDefault();
+        try {
+            target._parcelPopupPort.postMessage({ action: "focus-popup" });
+        } catch (_err) {
+            cleanupInlineTarget(target, target._parcelPopupPort);
+        }
+    }
+
     if (!(await config).disableContextPopup) {
         document.addEventListener("click", (ev) => handleTriggerClick(ev.target, ev.clientX, ev.clientY), { capture: true, passive: true });
+        document.addEventListener("keydown", handleTargetKeydown, { capture: true });
         document.addEventListener(
             "parcel-shadow-click",
             async (ev) => {
@@ -446,7 +515,6 @@
             port.disconnect();
             return;
         }
-        port.onDisconnect.addListener(() => delete targetBindings[port.name]);
         const updateStatus = (status) => port.postMessage({ action: "status", status });
         let el = targetBindings[port.name];
         if (!el) {
@@ -483,6 +551,10 @@
             port.disconnect();
             return;
         }
+        port.onDisconnect.addListener(() => {
+            if (port.name !== "broadcast") cleanupInlineTarget(el, port);
+            delete targetBindings[port.name];
+        });
         try {
             await getTargetInfo(el);
         } catch (_err) {
@@ -490,13 +562,30 @@
             port.disconnect();
             return;
         }
+        if (port.name !== "broadcast") el._parcelPopupPort = port;
+        // Sets _parcelFilling during fill so the input-close listener doesn't fire
+        const fillBoundField = async (...args) => {
+            el._parcelFilling = true;
+            try {
+                return await fillField(el, ...args);
+            } finally {
+                delete el._parcelFilling;
+            }
+        };
         port.onMessage.addListener(async (msg) => {
             if (msg?.action === "ready") {
                 port.postMessage({ action: "origin", origin: window.location.origin });
+            } else if (msg?.action === "focus-target") {
+                el.focus();
+            } else if (msg?.action === "focus-suspend") {
+                el._parcelFocusSuspended = true;
+            } else if (msg?.action === "focus-resume") {
+                delete el._parcelFocusSuspended;
             } else if (msg?.action === "fill-value") {
                 // Fill the target field with the selected value
                 updateStatus("Filling value...");
-                await fillField(el, null, null, null, msg.value);
+                await fillBoundField(null, null, null, msg.value);
+                cleanupInlineTarget(el, port);
                 port.postMessage({ action: "close" });
                 triggerPort.postMessage({ action: "close-popup" });
             } else if (msg?.action === "fill") {
@@ -505,7 +594,7 @@
                     updateStatus("Filling values...");
                     if (!Object.prototype.hasOwnProperty.call(msg, "config")) throw new Error("Config is missing.");
                     if (!Object.prototype.hasOwnProperty.call(msg, "plaintext")) throw new Error("Plaintext is missing.");
-                    await fillField(el, msg.plaintext, msg.config);
+                    await fillBoundField(msg.plaintext, msg.config);
                     if (msg.config.fillRelated) {
                         for (const rel of await getRelatedFields(el)) {
                             try {
@@ -515,6 +604,7 @@
                             }
                         }
                     }
+                    cleanupInlineTarget(el, port);
                     port.postMessage({ action: "close" });
                     triggerPort.postMessage({ action: "close-popup" });
 
@@ -547,6 +637,7 @@
             } else if (msg?.action === "resize") {
                 triggerPort.postMessage({ action: "resize-popup", height: msg.height, width: msg.width });
             } else if (msg?.action === "close") {
+                cleanupInlineTarget(el, port);
                 triggerPort.postMessage({ action: "close-popup" });
             }
         });
