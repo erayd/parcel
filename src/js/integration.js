@@ -117,21 +117,39 @@
             for (const target of (await validTargets).filter((t) => (related ? true : !t.relatedOnly))) {
                 if (el.matches(target.selector) && !el.readOnly && !el.disabled) {
                     finalTarget = target;
-                    break;
-                }
-            }
-            if (finalTarget) {
-                for (const target of (await invalidTargets).filter((t) => (related ? true : !t.relatedOnly))) {
-                    if (el.matches(target.selector)) {
-                        el.setAttribute("parcel-blacklist", target.selector);
-                        throw new Error(`Target element matches a blacklist selector: ${target.selector}`);
+
+                    finalTarget.related =
+                        (await config).targets.concat((await config).additionalTargets || []).find((t) => t.name === finalTarget.type)
+                            ?.related || [];
+                    finalTarget.isShadowSingle = false;
+
+                    // if the element is in a shadow DOM which contains no other related targets, mark is as a single-field shadow target
+                    const root = el.getRootNode();
+                    if (root?.host) {
+                        finalTarget.isShadowSingle = true;
+                        for (const target of (await validTargets).filter((t) => finalTarget?.related.includes(t.type))) {
+                            if (Helpers.shadowSelector(target.selector, root, target.shadow || null)) {
+                                finalTarget.isShadowSingle = false;
+                                break;
+                            }
+                        }
                     }
+
+                    // if the selector requires isShadowSingle, but the element is not in a single-field shadow DOM, skip it
+                    if (target.single && !finalTarget.isShadowSingle) continue;
+
+                    for (const target of (await invalidTargets).filter((t) => (related ? true : !t.relatedOnly))) {
+                        if (el.matches(target.selector)) {
+                            el.setAttribute("parcel-blacklist", target.selector);
+                            finalTarget = null;
+                            break;
+                        }
+                    }
+
+                    if (finalTarget) return finalTarget;
                 }
-                finalTarget.related =
-                    (await config).targets.concat((await config).additionalTargets || []).find((t) => t.name === finalTarget.type)
-                        ?.related || [];
             }
-            return finalTarget;
+            return null;
         } catch (err) {
             console.info(el); // log the target element to assist with troubleshooting selector issues
             throw err;
@@ -149,14 +167,18 @@
         const targetInfo = await getTargetInfo(el);
         const aggregationSelectors = (await targetSelectors).targetSelectors.filter((s) => s.type === "aggregate");
         let group;
-        for (const s of aggregationSelectors) {
-            group = el.closest(s.selector);
-            if (group) break;
+        if (targetInfo.isShadowSingle) group = el.getRootNode()?.host?.getRootNode(); // group singles by containing shadow host
+        if (group === document) group = null; // the document root is not a valid group
+        if (!group) {
+            for (const s of aggregationSelectors) {
+                group = Helpers.shadowClosest(el, s.selector);
+                if (group) break;
+            }
         }
         if (!group) return [];
         const relatedFields = [];
         for (const target of (await validTargets).filter((t) => targetInfo.related.includes(t.type))) {
-            for (const field of group.querySelectorAll(target.selector)) {
+            for (const field of Helpers.shadowSelectorAll(target.selector, group, target.shadow || null)) {
                 if (relatedFields.includes(field) || field === el) continue;
                 let isInvalid = false;
                 for (const target of await invalidTargets) {
@@ -386,10 +408,13 @@
         if (target._lastClicked && target._lastClicked > Date.now() - 350) return; // debounce multiple quick clicks
         target._lastClicked = Date.now();
 
-        //let popup = document.querySelector(".parcel-popup");
         try {
             const targetInfo = await getTargetInfo(target);
-            if (!Object.prototype.hasOwnProperty.call(target, "_parcelToken")) {
+            if (!Object.prototype.hasOwnProperty.call(target, "_parcelToken") || target._parcelToken === "broadcast") {
+                // A "broadcast" token is only ever set by the toolbar-popup (root-frame) binding path and is
+                // cleaned up on fill. If the toolbar popup is closed without filling, a stale "broadcast"
+                // token can remain on the element; reusing it for a context popup would load the popup iframe
+                // with token=broadcast and trip the anti-framing guard. Regenerate it to a per-element token.
                 try {
                     target._parcelToken = crypto.randomUUID();
                 } catch (_err) {
@@ -398,7 +423,9 @@
                 }
             }
             targetBindings[target._parcelToken] = target;
+            addTargetInputClose(target);
             authPort.postMessage(target._parcelToken);
+            if (targetInfo?.shadow) target.setAttribute("parcel-shadow", targetInfo.shadow);
             target.setAttribute("parcel-selector", targetInfo.selector);
             target.setAttribute("parcel-type", targetInfo.type);
 
@@ -416,13 +443,81 @@
         }
     }
 
+    /**
+     * Remove the input-close listener from a target element, if one is bound.
+     * @since 1.0.2
+     * @param {HTMLElement} target - The element to remove the listener from.
+     */
+    function removeTargetInputClose(target) {
+        if (!target?._parcelCloseOnInput) return;
+        target.removeEventListener("input", target._parcelCloseOnInput);
+        delete target._parcelCloseOnInput;
+    }
+
+    /**
+     * Clean up all Parcel bindings on a target element: removes the input-close listener,
+     * deletes the popup port reference, clears the focus-suspended flag, and removes the
+     * element from the target bindings map.
+     * @since 1.0.2
+     * @param {HTMLElement} target - The element to clean up.
+     * @param {chrome.runtime.Port|null} [port=null] - If provided, only cleans up if the target's bound port matches.
+     */
+    function cleanupInlineTarget(target, port = null) {
+        if (!target) return;
+        if (port && target._parcelPopupPort && target._parcelPopupPort !== port) return;
+        removeTargetInputClose(target);
+        if (!port || target._parcelPopupPort === port) delete target._parcelPopupPort;
+        delete target._parcelFocusSuspended;
+        if (target._parcelToken && target._parcelToken !== "broadcast") delete targetBindings[target._parcelToken];
+    }
+
+    /**
+     * Bind an input event listener to the target element that closes the popup and cleans
+     * up the target binding when the user starts typing.
+     * @since 1.0.2
+     * @param {HTMLElement} target - The element to bind the input-close listener to.
+     */
+    function addTargetInputClose(target) {
+        removeTargetInputClose(target);
+        target._parcelCloseOnInput = () => {
+            if (target._parcelFilling) return;
+            const popupPort = target._parcelPopupPort;
+            cleanupInlineTarget(target, popupPort);
+            triggerPort.postMessage({ action: "close-popup" });
+            popupPort?.disconnect();
+        };
+        target.addEventListener("input", target._parcelCloseOnInput);
+    }
+
+    /**
+     * Capture-phase keydown handler that intercepts Tab on popup-bound elements and
+     * redirects focus to the popup iframe. Uses `composedPath()` to find the bound element
+     * through shadow DOM boundaries. Skips interception when focus is suspended (e.g.
+     * during a blocking alert) or when the popup port is stale.
+     * @since 1.0.2
+     * @param {KeyboardEvent} ev - The keydown event.
+     */
+    function handleTargetKeydown(ev) {
+        if (ev.defaultPrevented || ev.key !== "Tab" || ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey) return;
+        const target = ev.composedPath().find((el) => el?._parcelPopupPort);
+        if (!target) return;
+        if (target._parcelFocusSuspended) return;
+        ev.preventDefault();
+        try {
+            target._parcelPopupPort.postMessage({ action: "focus-popup" });
+        } catch (_err) {
+            cleanupInlineTarget(target, target._parcelPopupPort);
+        }
+    }
+
     if (!(await config).disableContextPopup) {
         document.addEventListener("click", (ev) => handleTriggerClick(ev.target, ev.clientX, ev.clientY), { capture: true, passive: true });
+        document.addEventListener("keydown", handleTargetKeydown, { capture: true });
         document.addEventListener(
             "parcel-shadow-click",
             async (ev) => {
                 const target = Helpers.shadowSelector(`[parcel-shadow-event="${ev.detail.target}"]`, document);
-                target.removeAttribute("parcel-shadow-event");
+                target?.removeAttribute("parcel-shadow-event");
                 if (target) handleTriggerClick(target, ev.detail.x, ev.detail.y, true);
             },
             { capture: true, passive: true },
@@ -446,7 +541,6 @@
             port.disconnect();
             return;
         }
-        port.onDisconnect.addListener(() => delete targetBindings[port.name]);
         const updateStatus = (status) => port.postMessage({ action: "status", status });
         let el = targetBindings[port.name];
         if (!el) {
@@ -483,6 +577,10 @@
             port.disconnect();
             return;
         }
+        port.onDisconnect.addListener(() => {
+            if (port.name !== "broadcast") cleanupInlineTarget(el, port);
+            delete targetBindings[port.name];
+        });
         try {
             await getTargetInfo(el);
         } catch (_err) {
@@ -490,13 +588,30 @@
             port.disconnect();
             return;
         }
+        if (port.name !== "broadcast") el._parcelPopupPort = port;
+        // Sets _parcelFilling during fill so the input-close listener doesn't fire
+        const fillBoundField = async (...args) => {
+            el._parcelFilling = true;
+            try {
+                return await fillField(el, ...args);
+            } finally {
+                delete el._parcelFilling;
+            }
+        };
         port.onMessage.addListener(async (msg) => {
             if (msg?.action === "ready") {
                 port.postMessage({ action: "origin", origin: window.location.origin });
+            } else if (msg?.action === "focus-target") {
+                el.focus();
+            } else if (msg?.action === "focus-suspend") {
+                el._parcelFocusSuspended = true;
+            } else if (msg?.action === "focus-resume") {
+                delete el._parcelFocusSuspended;
             } else if (msg?.action === "fill-value") {
                 // Fill the target field with the selected value
                 updateStatus("Filling value...");
-                await fillField(el, null, null, null, msg.value);
+                await fillBoundField(null, null, null, msg.value);
+                cleanupInlineTarget(el, port);
                 port.postMessage({ action: "close" });
                 triggerPort.postMessage({ action: "close-popup" });
             } else if (msg?.action === "fill") {
@@ -505,7 +620,7 @@
                     updateStatus("Filling values...");
                     if (!Object.prototype.hasOwnProperty.call(msg, "config")) throw new Error("Config is missing.");
                     if (!Object.prototype.hasOwnProperty.call(msg, "plaintext")) throw new Error("Plaintext is missing.");
-                    await fillField(el, msg.plaintext, msg.config);
+                    await fillBoundField(msg.plaintext, msg.config);
                     if (msg.config.fillRelated) {
                         for (const rel of await getRelatedFields(el)) {
                             try {
@@ -515,6 +630,7 @@
                             }
                         }
                     }
+                    cleanupInlineTarget(el, port);
                     port.postMessage({ action: "close" });
                     triggerPort.postMessage({ action: "close-popup" });
 
@@ -523,12 +639,12 @@
                     let group;
                     const aggregationSelectors = (await targetSelectors).targetSelectors.filter((s) => s.type === "aggregate");
                     for (const s of aggregationSelectors) {
-                        group = el.closest(s.selector);
+                        group = Helpers.shadowClosest(el, s.selector);
                         if (group) break;
                     }
                     if (group) {
                         for (const target of submitTargets) {
-                            const submitButton = group.querySelector(target.selector);
+                            const submitButton = Helpers.shadowSelector(target.selector, group);
                             if (submitButton) {
                                 await new Promise((resolve) => requestAnimationFrame(resolve));
                                 submitButton.focus();
@@ -547,6 +663,7 @@
             } else if (msg?.action === "resize") {
                 triggerPort.postMessage({ action: "resize-popup", height: msg.height, width: msg.width });
             } else if (msg?.action === "close") {
+                cleanupInlineTarget(el, port);
                 triggerPort.postMessage({ action: "close-popup" });
             }
         });

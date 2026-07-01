@@ -67,6 +67,22 @@
     let history = [];
 
     /**
+     * Focus the currently-selected element in the popup, defaulting to the search input
+     * or the first list item if no selection exists. Also calls `window.focus()` to bring
+     * the popup iframe to the foreground.
+     * @since 1.0.2
+     */
+    function focusSelected() {
+        let selected = document.querySelector(".selected");
+        if (!selected) {
+            selected = document.getElementById("searchPattern") || document.querySelector("li");
+            selected?.classList.add("selected");
+        }
+        window.focus();
+        selected?.focus();
+    }
+
+    /**
      * Hash a string with SHA-256, delegating to the background service worker if the
      * Web Crypto API is unavailable in this context.
      * @since 1.0.0
@@ -371,7 +387,7 @@
                 else if (ev.key === "Escape") window.close();
                 document.getElementById("modal-shade").classList.add("hidden");
                 document.querySelector(".selected").scrollIntoView({ behavior: "smooth", block: "nearest" });
-                document.querySelector(".selected").focus();
+                focusSelected();
             }
         });
         tabPort.onMessage.addListener((msg) => {
@@ -391,6 +407,69 @@
                 tabPort.postMessage({ action: "close" });
             }
         });
+
+        // When the detail view is open, allow typing a 1-based plaintext line
+        // number to fill that line's value into the target element, just as
+        // clicking the line would. Digit input is accumulated and the value is
+        // filled automatically once input pauses for the timeout duration.
+        // When there are fewer than ten lines, a second digit could never form
+        // a valid index, so the value is filled immediately on the first digit
+        // instead of waiting. Escape cancels any pending input. The detail view
+        // is modal, so it captures keystrokes regardless of where focus sits.
+        let lineNumberBuffer = "";
+        let lineNumberTimer = null;
+        const LINE_NUMBER_TIMEOUT = 850;
+        window.addEventListener("keydown", (ev) => {
+            const detail = document.getElementsByTagName("parcel-detail").item(0);
+            if (!detail) return;
+            if (ev.ctrlKey || ev.altKey || ev.metaKey) return;
+
+            if (/^\d$/.test(ev.key)) {
+                ev.preventDefault();
+                lineNumberBuffer += ev.key;
+                if (lineNumberTimer) {
+                    clearTimeout(lineNumberTimer);
+                    lineNumberTimer = null;
+                }
+                const lineCount = detail.shadowRoot.querySelectorAll("parcel-plaintext-line").length;
+                if (lineCount < 10) {
+                    fillPlaintextLine(detail, lineNumberBuffer);
+                    lineNumberBuffer = "";
+                } else {
+                    lineNumberTimer = setTimeout(() => {
+                        fillPlaintextLine(detail, lineNumberBuffer);
+                        lineNumberBuffer = "";
+                        lineNumberTimer = null;
+                    }, LINE_NUMBER_TIMEOUT);
+                }
+                return;
+            }
+            if (ev.key === "Escape") {
+                lineNumberBuffer = "";
+                if (lineNumberTimer) {
+                    clearTimeout(lineNumberTimer);
+                    lineNumberTimer = null;
+                }
+            }
+        });
+
+        /**
+         * Fill the value of a plaintext line (1-based index) from a detail view
+         * into the active target element, matching the behaviour of clicking
+         * the line. Out-of-range indices are ignored.
+         * @since 1.0.2
+         * @param {ParcelDetail} detail - The detail element containing the lines.
+         * @param {string|number} index - The 1-based line number to fill.
+         * @returns {void}
+         */
+        function fillPlaintextLine(detail, index) {
+            const lines = detail.shadowRoot.querySelectorAll("parcel-plaintext-line");
+            const i = parseInt(index, 10);
+            if (!Number.isNaN(i) && i >= 1 && i <= lines.length) {
+                const line = lines[i - 1];
+                tabPort.postMessage({ action: "fill-value", value: line.getValue() });
+            }
+        }
     }
 
     if (tab.url) {
@@ -407,7 +486,7 @@
     document.getElementById("modal-shade").addEventListener("click", () => {
         document.querySelectorAll("parcel-detail").forEach((el) => el.remove());
         document.getElementById("modal-shade").classList.add("hidden");
-        document.querySelector(".selected").focus();
+        focusSelected();
     });
 
     window.addEventListener("keydown", (ev) => {
@@ -424,6 +503,15 @@
             selected.scrollIntoView({ behavior: "smooth", block: "nearest" });
             selected.focus();
         } else if (ev.key === "ArrowUp" || (ev.key === "Tab" && ev.shiftKey)) {
+            if (ev.key === "Tab" && ev.shiftKey && token !== "broadcast" && selected.id === "searchPattern") {
+                ev.preventDefault();
+                try {
+                    tabPort.postMessage({ action: "focus-target" });
+                } catch (_err) {
+                    window.close();
+                }
+                return;
+            }
             ev.preventDefault();
             selected.classList.remove("selected");
             if (selected.tagName === "LI") {
@@ -451,7 +539,9 @@
 
     // listen for status & error messages returned from the content script
     tabPort.onMessage.addListener((msg) => {
-        if (msg?.action === "status") {
+        if (msg?.action === "focus-popup") {
+            focusSelected();
+        } else if (msg?.action === "status") {
             document.querySelector("#status").textContent = msg.status;
         } else if (msg?.action === "clear-status") {
             document.querySelector("#status").textContent = "Idle";
@@ -473,11 +563,19 @@
             if (tab.url) {
                 const tabURL = new URL(tab.url);
                 if (msg.origin !== tabURL.origin) {
+                    tabPort.postMessage({ action: "focus-suspend" });
                     alert(
                         `The field you are trying to fill is from a different origin (${msg.origin}) than the page you ` +
                             `are browsing (${tabURL.origin}). This may be a sign of a security issue. Do not ` +
                             `enter any sensitive information into this field unless you are sure it is safe to do so.`,
                     );
+                    if (!tabPort.disconnected) {
+                        try {
+                            tabPort.postMessage({ action: "focus-resume" });
+                        } catch (_err) {
+                            // port died during alert; content script cleanup will handle the suspended state
+                        }
+                    }
                 }
             }
         }
@@ -521,6 +619,7 @@
                 }
                 li = document.createElement("li");
                 li._keep = true;
+                li.tabIndex = -1;
                 li.setAttribute("data-path", entry.path);
                 if (entry.isInHistory) li.classList.add("history");
                 li.setAttribute("data-sort-order", entry.sortOrder);
@@ -671,7 +770,8 @@
     update();
 
     // UI updates when the anti-phishing mode is toggled
-    document.getElementById("searchPattern").focus();
+    if (token === "broadcast") focusSelected();
+    document.getElementById("live-region").textContent = "Parcel popup opened. Press Tab to interact.";
     document.getElementById("searchPattern").addEventListener("keydown", (ev) => {
         if (ev.key === "Backspace" && search.value.length === 0) {
             limit = false;
