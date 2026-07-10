@@ -138,11 +138,17 @@ function action_install() {
     # verify signer
     local SIGNER
     if ! SIGNER="$(grep VALIDSIG <<< "$OUT" | cut -d' ' -f12)" || [ -z "$SIGNER" ]; then
-        parcel_error "Signature verification failed: No primary fingerprint:\n$OUT"
+        # Log the full GPG status output for debugging; do not leak it to the extension.
+        printf '[%s] Signature verification failed: No primary fingerprint:\n%s\n' \
+            "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$OUT" >&5
+        parcel_error "Signature verification failed: No primary fingerprint"
         return 0
     fi
     if [[ ! " $VALID_SIGNERS " =~ [[:space:]]$SIGNER[[:space:]] ]]; then
-        parcel_error "Signature verification failed: Invalid primary fingerprint:\n$OUT"
+        # Log the full GPG status output for debugging; do not leak it to the extension.
+        printf '[%s] Signature verification failed: Invalid primary fingerprint:\n%s\n' \
+            "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$OUT" >&5
+        parcel_error "Signature verification failed: Invalid primary fingerprint"
         return 0
     fi
 
