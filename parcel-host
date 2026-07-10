@@ -181,6 +181,8 @@ function main() {
         local ACTION="$(jq -r .action <<< "$MESSAGE")"
         if [ -z "$ACTION" ]; then
             parcel_error "Missing host action"
+        elif [[ ! "$ACTION" =~ ^[a-zA-Z0-9_]+$ ]]; then
+            parcel_error "Invalid host action: $ACTION"
         else
             if [ "$(type -t "action_$ACTION")" = "function" ]; then
                 if ! "action_$ACTION" "$MESSAGE"; then
