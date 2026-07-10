@@ -32,7 +32,7 @@
     },
     "web_accessible_resources": [
         {
-            "resources": ["html/popup.html", "js/helpers.js", "js/schema.js", "js/selectors.js", "js/targets.js"],
+            "resources": ["html/popup.html", "js/helpers.js", "js/integration.js", "js/schema.js", "js/selectors.js", "js/targets.js"],
             "matches": ["<all_urls>"]
         }
     ],
