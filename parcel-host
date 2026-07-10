@@ -83,6 +83,7 @@ PASSWORD_STORE_DIR="$HOME/.password-store"
 mkdir -p "$(dirname "$LOGFILE")"
 exec 5>>"$LOGFILE"
 exec 2>&5
+chmod 0600 "$LOGFILE"
 if [ -z "$VALID_SIGNERS" ]; then VALID_SIGNERS="88FF14D6294AF4036B7F00FF676A3C09E2E47A72 56C3E775E72B0C8B1C0C1BD0B5DB77409B11B601 82ED663067C6017BAA4BC752EB670BF2B1131683 B0908ED59A96C9882BED9A942A51761511A30253"; fi
 if [ -n "$GPG" ]; then function gpg() { "$GPG" "$@"; return $?; }; fi
 if [ -n "$JQ" ]; then function jq() { "$JQ" "$@"; return $?; }; fi
