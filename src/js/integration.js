@@ -120,7 +120,7 @@
         if (ev.persisted) triggerPort.reconnect();
     });
     window.addEventListener("message", (ev) => {
-        if (ev.data?.action === "parcel-frame-id") {
+        if (ev.data?.action === "parcel-frame-id" && typeof ev.source?.postMessage === "function") {
             const frameEl = [...document.querySelectorAll("iframe")].find((f) => f.contentWindow === ev.source);
             if (frameEl) frameEl._parcelFrameId = ev.data.frameId;
         }
@@ -137,7 +137,15 @@
             if (msg.action === "config") {
                 port.disconnect();
                 frameId = msg?.frameId || 0;
-                if (window !== window.top) window.top.postMessage({ action: "parcel-frame-id", frameId }, "*");
+                if (window !== window.top) {
+                    // Restrict the broadcast to the top-level origin so a
+                    // cross-origin embedding page can't observe it. ancestorOrigins
+                    // exposes ancestor origins even cross-origin; fall back to "*"
+                    // in browsers that don't implement it.
+                    const ancestors = location.ancestorOrigins;
+                    const topOrigin = ancestors?.length ? ancestors.item(ancestors.length - 1) : "*";
+                    window.top.postMessage({ action: "parcel-frame-id", frameId }, topOrigin);
+                }
                 resolve(msg.config);
             }
         });
