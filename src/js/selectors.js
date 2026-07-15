@@ -2,7 +2,7 @@
 
 /**
  * Default CSS selector rules used to identify fill targets.
- * @type {Array<{selector: string, type: string, host?: string[], relatedOnly?: boolean}>}
+ * @type {Array<{selector: string, type: string, host?: string[], relatedOnly?: boolean, relatedNever?: boolean}>}
  * @since 1.0.0
  */
 export const targetSelectors = [
@@ -17,18 +17,18 @@ export const targetSelectors = [
     { selector: "#form", type: "aggregate" },
 
     // type: secret
-    { selector: "input[autocomplete~=current-password i]", type: "secret" },
+    { selector: "input[autocomplete~=current-password i]", type: "secret", relatedNever: true },
     { selector: "input[type=password i]", type: "secret" },
-    { selector: "input[name=password i]", type: "secret" },
-    { selector: "input[id=password i]", type: "secret" },
-    { selector: "input[name~=pwd i]", type: "secret" },
-    { selector: "input[type=pin i]", type: "secret" },
-    { selector: "input[name=pin i]", type: "secret" },
-    { selector: "input[id=pin i]", type: "secret" },
-    { selector: "input[class~=password i]", type: "secret" },
-    { selector: "input[class~=pwd i]", type: "secret" },
-    { selector: "input[class~=pin i]", type: "secret" },
-    { selector: "input[placeholder=password i]", type: "secret" },
+    { selector: "input[name=password i]", type: "secret", relatedNever: true },
+    { selector: "input[id=password i]", type: "secret", relatedNever: true },
+    { selector: "input[name~=pwd i]", type: "secret", relatedNever: true },
+    { selector: "input[type=pin i]", type: "secret", relatedNever: true },
+    { selector: "input[name=pin i]", type: "secret", relatedNever: true },
+    { selector: "input[id=pin i]", type: "secret", relatedNever: true },
+    { selector: "input[class~=password i]", type: "secret", relatedNever: true },
+    { selector: "input[class~=pwd i]", type: "secret", relatedNever: true },
+    { selector: "input[class~=pin i]", type: "secret", relatedNever: true },
+    { selector: "input[placeholder=password i]", type: "secret", relatedNever: true },
 
     // type: totp
     { selector: "input[autocomplete~=one-time-code i]", type: "totp" },

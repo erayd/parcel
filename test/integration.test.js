@@ -412,6 +412,107 @@ describe("Integration script", { concurrency: false }, () => {
         assert.strictEqual(pass.value, "hunter2");
     });
 
+    test("relatedNever field is not filled as a related field", async () => {
+        clearBody();
+        const form = document.createElement("form");
+        const user = makeInput({ type: "text", name: "username" });
+        const realPass = makeInput({ type: "password", name: "password" });
+        const textPass = makeInput({ type: "text", name: "password" });
+        form.appendChild(user);
+        form.appendChild(realPass);
+        form.appendChild(textPass);
+        document.body.appendChild(form);
+
+        const triggerReceiver = portReceivers["trigger"];
+        const popupPromise = nextMessage(triggerReceiver, "trigger-popup", 3000);
+        await click(user);
+        await popupPromise;
+
+        const token = user._parcelToken;
+        assert.ok(token);
+
+        const port = mock.chrome.runtime.connect({ name: token });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const originPromise = nextMessage(port, "origin", 3000);
+        port.postMessage({ action: "ready" });
+        await originPromise;
+
+        port.postMessage({
+            action: "fill",
+            config: makeValidConfig({
+                targets: [
+                    {
+                        name: "login",
+                        pattern: "^(user|username|login|email):",
+                        related: ["secret"],
+                        onMissing: "null",
+                        strip: true,
+                        transform: [],
+                        trim: true,
+                    },
+                    {
+                        name: "secret",
+                        pattern: "^(secret|password):",
+                        related: [],
+                        onMissing: "null",
+                        strip: true,
+                        transform: [],
+                        trim: true,
+                    },
+                ],
+            }),
+            plaintext: "login: bob\nsecret: hunter2",
+        });
+
+        await nextMessage(port, "close", 3000);
+        assert.strictEqual(user.value, "bob");
+        assert.strictEqual(realPass.value, "hunter2");
+        assert.strictEqual(textPass.value, "", "text field with name=password should not be filled as a related field");
+    });
+
+    test("relatedNever field is still detected as a primary target", async () => {
+        clearBody();
+        const form = document.createElement("form");
+        const textPass = makeInput({ type: "text", name: "password" });
+        form.appendChild(textPass);
+        document.body.appendChild(form);
+
+        const triggerReceiver = portReceivers["trigger"];
+        const popupPromise = nextMessage(triggerReceiver, "trigger-popup", 3000);
+        await click(textPass);
+        await popupPromise;
+
+        const token = textPass._parcelToken;
+        assert.ok(token, "relatedNever field should be detected as a primary target");
+
+        const port = mock.chrome.runtime.connect({ name: token });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const originPromise = nextMessage(port, "origin", 3000);
+        port.postMessage({ action: "ready" });
+        await originPromise;
+
+        port.postMessage({
+            action: "fill",
+            config: makeValidConfig({
+                targets: [
+                    {
+                        name: "secret",
+                        pattern: "^(secret|password):",
+                        related: [],
+                        onMissing: "null",
+                        strip: true,
+                        transform: [],
+                        trim: true,
+                    },
+                ],
+            }),
+            plaintext: "secret: hunter2",
+        });
+
+        await nextMessage(port, "close", 3000);
+        assert.strictEqual(textPass.value, "hunter2");
+    });
+
     test("fill message handles select element (month)", async () => {
         clearBody();
         const sel = document.createElement("select");
