@@ -4,12 +4,22 @@ CURRENT_VERSION := $(shell cat .version)
 PRETTIER := $(PWD)/node_modules/.bin/prettier
 ESLINT := $(PWD)/node_modules/.bin/eslint
 
+# Cutoff date for dev-time dependencies. This should be maintained at the oldest date available for
+# which the required dev dependencies can still be resolved, unless security considerations require
+# bumping it forward. The purpose of this cutoff is to reduce the likelihood of supply-chain attacks
+# against a developer machine. If this is changed, the lockfile should also be updated to match.
+DEPS_INSTALL_CUTOFF := 2026-06-10
+
 .PHONY: all
 all: extension chrome firefox
 
 .PHONY: extension
 extension:
 	$(MAKE) VERSION=$(VERSION) -C ./src
+
+.PHONY: install-deps
+install-deps:
+	npm install --ignore-scripts --before '$(DEPS_INSTALL_CUTOFF)'
 
 .PHONY: prettier
 prettier:
