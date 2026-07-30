@@ -222,6 +222,10 @@ ul {
     z-index: 15;
 }
 body.passkey-popup {
+    /* the ceremony card needs more height than the 400px field-popup clamp; scrollbars
+       keep anything beyond the 600px global cap reachable instead of clipped */
+    max-height: 600px;
+    overflow-y: auto;
     #search,
     #entries {
         display: none;
@@ -336,7 +340,9 @@ body.passkey-popup {
         margin-bottom: 8px;
     }
     #passkey-commit-label {
-        display: block;
+        align-items: center;
+        display: flex;
+        gap: 0.3em;
         margin-bottom: 4px;
     }
     #passkey-blob {

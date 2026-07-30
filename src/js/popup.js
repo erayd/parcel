@@ -466,10 +466,24 @@
             await new Promise((resolve) => requestAnimationFrame(resolve));
             document.body.style.minHeight = this.scrollHeight + "px";
             document.body.style.minWidth = `min(500px, ${this.scrollWidth}px)`;
-            tabPort.postMessage({ action: "resize", width: document.body.scrollWidth, height: document.body.scrollHeight });
+            reportPopupSize();
         }
     }
     customElements.define("parcel-detail", ParcelDetail);
+
+    /**
+     * Report the popup's rendered size to the host page, which uses it to size the
+     * popup iframe. The body's visible border-box is measured instead of scrollWidth/
+     * scrollHeight: on a height-clamped body the scroll dimensions describe
+     * the overflowing content, so the frame would grow past the body - leaving dead
+     * space at the bottom while the overflow clips the content off the top.
+     * @since 1.0.4
+     * @returns {void}
+     */
+    function reportPopupSize() {
+        const rect = document.body.getBoundingClientRect();
+        tabPort.postMessage({ action: "resize", width: Math.ceil(rect.width), height: Math.ceil(rect.height) });
+    }
 
     // init specific to the popup invocation type
     if (token === "broadcast") {
@@ -493,10 +507,8 @@
     } else {
         document.body.classList.add("context-popup");
         // the iframe is off-limits to the page origin, so need to tell it when we change size
-        new ResizeObserver(() => {
-            tabPort.postMessage({ action: "resize", width: document.body.scrollWidth, height: document.body.scrollHeight });
-        }).observe(document.body);
-        tabPort.postMessage({ action: "resize", width: document.body.scrollWidth, height: document.body.scrollHeight });
+        new ResizeObserver(reportPopupSize).observe(document.body);
+        reportPopupSize();
         window.addEventListener("keydown", (ev) => {
             if (ev.key === "Escape") {
                 tabPort.postMessage({ action: "close" });
@@ -912,7 +924,7 @@
                     elExisting.classList.add("hidden");
                     elExistingList.classList.add("hidden");
                 }
-                elCreate.focus();
+                elCreate.focus({ preventScroll: true });
             } else {
                 elExisting.classList.add("hidden");
                 elExistingList.classList.add("hidden");
@@ -964,7 +976,7 @@
                     });
                     elEntries.appendChild(document.createElement("li")).appendChild(button);
                 }
-                elEntries.querySelector("button")?.focus();
+                elEntries.querySelector("button")?.focus({ preventScroll: true });
             }
         }
 
@@ -985,7 +997,9 @@
                 });
                 document.querySelector("#status").textContent = "Save the new passkey entry to continue";
                 elSave.classList.remove("hidden");
-                elCopy.focus();
+                // preventScroll: the enlarged body may not have been re-measured yet, and
+                // scrolling the overflow-hidden body to the new button would clip the title
+                elCopy.focus({ preventScroll: true });
             }
         });
     }
