@@ -493,7 +493,12 @@ export class Agent extends EventTarget {
                             console.warn("Falling back to fire-and-forget fill from agent");
                             const tabPort = chrome.tabs.connect(tabId, { name: "broadcast", frameId: 0 });
                             tabPort.onMessage.addListener(() => {}); // ignore responses, because we aren't an actual popup instance
-                            tabPort.postMessage({ action: "fill", config: this.#config, plaintext: result.plaintext });
+                            tabPort.postMessage({
+                                action: "fill",
+                                origin: message.origin,
+                                config: this.#config,
+                                plaintext: result.plaintext,
+                            });
                         } else throw err;
                     }
                 } else if (message?.action === "config") {
@@ -595,11 +600,21 @@ export class Agent extends EventTarget {
                     const hash = await Helpers.sha256(message.value);
                     port.postMessage({ action: "sha256-digest", value: message.value, hash });
                 }
-                if (Object.prototype.hasOwnProperty.call(message, "action")) clearErrors(message.action);
+                if (Object.prototype.hasOwnProperty.call(message, "action")) {
+                    try {
+                        clearErrors(message.action);
+                    } catch (_err) {
+                        chrome.runtime.lastError;
+                    }
+                }
             } catch (err) {
                 if (Object.prototype.hasOwnProperty.call(err, "logAs")) console[err.logAs](err);
                 else console.error(err);
-                port.postMessage({ action: "error", error: err.message, category: err.category || message?.action || "default" });
+                try {
+                    port.postMessage({ action: "error", error: err.message, category: err.category || message?.action || "default" });
+                } catch (_err) {
+                    chrome.runtime.lastError;
+                }
             }
         });
     }
