@@ -38,6 +38,7 @@ Parcel is split into two halves:
 
 - **jq** >= 1.5
 - **gpg** >= 2.2.20
+- **openssl** >= 1.1.1 (for passkey support)
 - An existing `pass`-style password store
 
 If you wish to run the test suite, you will also need the following:
