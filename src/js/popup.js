@@ -742,7 +742,7 @@
         let cmd = `mkdir -p ${q(dir)} && cat > ${q(file)} <<'PARCEL_PASSKEY_EOF'\n${content}\nPARCEL_PASSKEY_EOF\n`;
         if (rpId) {
             const gitDir = passdir && file.startsWith(passdir) ? passdir : dir;
-            cmd += `git -C ${q(gitDir)} add ${q(file)} && git -C ${q(gitDir)} commit -m "Added passkey for ${rpId} to store."\n`;
+            cmd += `git -C ${q(gitDir)} add ${q(file)} && git -C ${q(gitDir)} commit -m "Add passkey for ${rpId} to store."\n`;
         }
         return cmd;
     }
