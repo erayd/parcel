@@ -28,6 +28,8 @@ export class Agent extends EventTarget {
     #authorisedTokens = new Set();
     #publicSuffixList = null;
     #refreshingEntries = null;
+    #nativePingInterval = null;
+    #nativePingFailures = 0;
 
     /**
      * Construct a new Agent instance.
@@ -43,6 +45,13 @@ export class Agent extends EventTarget {
                 this.#clearContainerHistory(changeInfo.contextualIdentity?.cookieStoreId),
             );
         }
+
+        // Content scripts send a periodic keepalive message to reset the MV3
+        // service worker's inactivity timer, keeping the worker (and its
+        // #nativePingInterval below) alive as long as at least one tab is open.
+        chrome.runtime.onMessage.addListener((msg) => {
+            if (msg?.type === "keepalive") return;
+        });
 
         // Explicit re-init hooks for MV3 service-worker lifecycle events.
         // onStartup fires when the browser starts; onInstalled fires on
@@ -92,6 +101,7 @@ export class Agent extends EventTarget {
                 throw new Error(`Failed to install native host: ${err.message}`);
             }
             this.#setConfig(await this.#callNative("configure"));
+            this.#startNativePing();
             this.dispatchEvent(new CustomEvent("ready"));
         } catch (err) {
             this.#initError = err;
@@ -127,6 +137,52 @@ export class Agent extends EventTarget {
         this.#connectedNative = true;
         this.#host.onDisconnect.addListener(this.#onNativeDisconnect.bind(this));
         this.#host.onMessage.addListener(this.#onNativeMessage.bind(this));
+    }
+
+    /**
+     * Start a periodic ping to the native host to prevent the idle watchdog
+     * (in src/parcel-host's dd() shadow) from killing the host during normal
+     * idle periods. The interval is well within the host's 300s timeout.
+     *
+     * A ping timeout does not necessarily mean the host is dead — the ping's
+     * 5s window can lapse while the host is legitimately busy (e.g. a long
+     * pinentry wait inside a decrypt). But if several pings fail in a row the
+     * host is assumed wedged with its pipe still open (where the watchdog
+     * cannot help), so the port is disconnected, which routes through
+     * #onNativeDisconnect and reconnects with a fresh host.
+     *
+     * @since 1.0.5
+     * @returns {void}
+     */
+    #startNativePing() {
+        if (this.#nativePingInterval) this.#stopNativePing();
+        this.#nativePingInterval = setInterval(() => {
+            if (!this.#connectedNative) return;
+            this.#callNative("ping", {}, 5000)
+                .then(() => {
+                    this.#nativePingFailures = 0;
+                })
+                .catch((err) => {
+                    console.error(`Native host ping failed: ${err.message}`);
+                    if (++this.#nativePingFailures >= 3 && this.#connectedNative) {
+                        console.error("Native host unresponsive after 3 consecutive pings - reconnecting");
+                        this.#nativePingFailures = 0;
+                        this.#host.disconnect();
+                    }
+                });
+        }, 60_000);
+    }
+
+    /**
+     * Stop the periodic native host ping.
+     * @since 1.0.5
+     * @returns {void}
+     */
+    #stopNativePing() {
+        if (this.#nativePingInterval) {
+            clearInterval(this.#nativePingInterval);
+            this.#nativePingInterval = null;
+        }
     }
 
     /**
@@ -226,6 +282,7 @@ export class Agent extends EventTarget {
      */
     async #onNativeDisconnect() {
         this.#connectedNative = false;
+        this.#stopNativePing();
         if (this.#host.error) {
             console.error(new Error(this.#host.error.message));
         }
@@ -247,16 +304,40 @@ export class Agent extends EventTarget {
 
     /**
      * Wait until the native host has finished initialising.
+     *
+     * If the bootstrap message never arrives (e.g. the host process started but
+     * got stuck during GPG / signature checks) neither "ready" nor "initFailed"
+     * will ever fire. Without a timeout this promise — and every port handler
+     * awaiting it — would hang forever, wedging the entire extension. The
+     * timeout ensures the failure surfaces so the service worker can retry.
      * @since 1.0.0
+     * @param {number} [timeout=15000] - Maximum time to wait in milliseconds.
      * @returns {Promise<void>}
-     * @throws {Error} If initialisation previously failed.
+     * @throws {Error} If initialisation previously failed or timed out.
      */
-    async #waitUntilReady() {
+    async #waitUntilReady(timeout = 15000) {
         if (this.#config) return;
         if (this.#initError) throw this.#initError;
         await new Promise((resolve, reject) => {
-            this.addEventListener("ready", () => resolve(), { once: true });
-            this.addEventListener("initFailed", (ev) => reject(new Error(ev.detail)), { once: true });
+            const cleanup = () => {
+                clearTimeout(timer);
+                this.removeEventListener("ready", onReady);
+                this.removeEventListener("initFailed", onFailed);
+            };
+            const timer = setTimeout(() => {
+                cleanup();
+                reject(new Error("Native host initialisation timed out"));
+            }, timeout);
+            const onReady = () => {
+                cleanup();
+                resolve();
+            };
+            const onFailed = (ev) => {
+                cleanup();
+                reject(new Error(ev.detail));
+            };
+            this.addEventListener("ready", onReady);
+            this.addEventListener("initFailed", onFailed);
         });
     }
 
