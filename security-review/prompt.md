@@ -1,7 +1,5 @@
 # Parcel Security Review — Reusable Base Prompt
 
-<!-- base-prompt: v1.4.0 -->
-
 > **Maintainer notes — this block is NOT part of the prompt.**
 >
 > Send each reviewing model everything from the `---` divider below to the appendix divider, verbatim. Reviews are run by two models independently (e.g. kimi-k3 and glm-5.2) against the same commit. Each model runs in its **own container** with its own filesystem. At the end of phase 1, each model saves its draft report plus a small findings-table exchange file (`security-review/security-review-table-<model>-<yyyymmdd>-<ref>.md`, at the root of `security-review/` — not in `reviews/`) and stops. Once **both** models have stopped (never earlier — early delivery would contaminate phase-1 independence), export each model's exchange file from its container and **import a copy into the other model's container** (into that container's `security-review/` folder), then advise each model of the file name as a follow-up message. Never give a model the other's full report. Each model then completes its `## Cross-Model Verification` section and finalises. Exchange files are temporary review artifacts: each model deletes its own container's copies (its own file and the imported one) when its review is finished — deletions stay inside the container, so there is no shared-filesystem race. Both reports are saved separately under `security-review/reviews/`; maintainers own `findings.md`.
