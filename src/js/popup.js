@@ -1148,6 +1148,8 @@
                 li.appendChild(button);
 
                 li.addEventListener("click", async () => {
+                    // The origin here is the *top-level* origin in the tab; this indicates which page the user was on when they triggered
+                    // the fill request, for easier audit correlation - we aren't trying to keep track of the specific frame origin here.
                     port.postMessage({ action: "decrypt", intent: "fill", origin: url.origin, path: entry.path });
                     if (history?.[0]?.path === (await sha256(entry.path))) {
                         history[0].when = Date.now();
