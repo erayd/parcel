@@ -494,6 +494,10 @@ export class Agent extends EventTarget {
         }
 
         if (port.name === "auth") {
+            // Note that this token is a *correlation* identifier that governs the binding between clicked elements on
+            // the page and the context-mode popup. It is explicitly *not* a protection against a compromised integration.js,
+            // as that script runs in the isolated world (i.e. it is part of the extension's own context), and under any
+            // scenario under which the actual logic of integration.js is compromised, agent.js is likely *also* compromised.
             port.onMessage.addListener((token) => this.#authorisedTokens.add(token));
             return;
         }
@@ -553,6 +557,8 @@ export class Agent extends EventTarget {
             try {
                 if (port.name === "popup") {
                     if (message?.action === "auth" && (this.#authorisedTokens.has(message.token) || message.token === "broadcast")) {
+                        // A broadcast token indicates either the toolbar popup, or the fire-and-forget fallback after a toolbar popup was
+                        // closed after initiating a decrypt & fill operation. In latter case, integration.js takes over to finish the job.
                         if (message.token !== "broadcast") this.#authorisedTokens.delete(message.token);
                         authorised = true;
                         token = message.token;
@@ -587,6 +593,7 @@ export class Agent extends EventTarget {
                     updateStatus("Decrypting entry...");
                     const result = await this.#callNative(
                         "decrypt",
+                        // use origin from the message, because port.sender is not authoritative - the other end may be a *popup-bridge* port
                         { path: message.path, intent: message.intent, origin: message.origin },
                         this.#config.decryptTimeout * 1000,
                     );
