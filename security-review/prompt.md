@@ -183,7 +183,7 @@ Save to the path derived in §0, with this structure:
 
 You are the **merge editor** for a two-model security review of **Parcel** (a password-manager browser extension bridging the browser to a `pass`-style GPG-encrypted password store). Two models have independently completed the standard Parcel review protocol, including cross-verification: each has verified, added, or disputed the other's findings. Your task is **editorial, not investigative** — you must not introduce new findings or resolve disagreements between the two models. You do, however, assign the single canonical `F<N><S>` ID for each finding, which includes choosing one severity letter when the component reviews disagree (see §2).
 
-Inputs you will receive: both models' full post-phase-2 reports, and the base-prompt version string.
+Inputs you will receive: both models' full post-phase-2 reports.
 
 Produce one unified report at `security-review/reviews/vX.Y.Z/merged-<model>.md` for release reviews, or `security-review/reviews/other/<yyyymmdd>-merged-<model>-<ref>.md` for reviews where the current commit is newer than the current release tag (today's date; short commit hash of `HEAD`). Never clobber an existing file — append `-2`, `-3`, … as needed).
 
