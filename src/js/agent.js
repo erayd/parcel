@@ -543,7 +543,7 @@ export class Agent extends EventTarget {
 
         // Allow-list: map port names to the actions they are permitted to invoke.
         // `decrypt`/`match` are privileged and only available to authorised popup ports;
-        // content-script (`integration`) ports may only request `config`/`sha256`.
+        // content-script (`integration`) ports may only request `config`.
         // Unknown actions are always rejected.
         const PORT_ACTIONS = {
             popup: ["auth", "config", "decrypt", "match", "sha256"],
