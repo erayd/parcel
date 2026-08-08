@@ -154,8 +154,6 @@ Located at `$PASSWORD_STORE_DIR/.parcel.json`. Reloaded automatically when modif
 
 Parcel is subject to regular automated security reviews in order to surface any potential vulnerabilities. These reviews, along with a summary of findings and the maintainers' responses, are published in the `security-reviews` directory in this repository.
 
-Where a review is conducted against a specific release, that review is included in the release artifacts on GitHub.
-
 If you are a security professional who is interested in contributing to the project by performing a review, please open a new issue to coordinate this.
 
 ## Reporting Security Issues
