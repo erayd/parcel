@@ -9,7 +9,7 @@ blame_cache=$(mktemp)
 trap 'rm -f "$todo_cache" "$blame_cache"' EXIT
 
 # Step 1: Find and clean TODO lines (same sed filters as the previous Makefile target).
-grep -rn 'TODO' src test *.md 2>/dev/null | grep -v '^AGENTS\.md:' \
+grep -rn --exclude-dir=publicsuffix 'TODO' src test *.md 2>/dev/null | grep -v '^AGENTS\.md:' \
     | sed -E \
         -e 's/^([^:]*:[^:]*:)[[:space:]]*(\/\/|#|\/\*|\*|<!--)*[[:space:]]*/\1/' \
         -e 's/^([^:]*:[^:]*:)[[:space:]]*(-|[0-9]+\.)[[:space:]]*/\1/' \
