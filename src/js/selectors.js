@@ -40,6 +40,7 @@ export const targetSelectors = [
     { selector: "input[name$=two-factor i]", type: "totp" },
     { selector: "input[name$=two_factor i]", type: "totp" },
     { selector: "input[name*=totp i]", type: "totp" },
+    { selector: "input[placeholder*=auth i][placeholder*=code i]", type: "totp" }, // squarespace.com
 
     // type: login
     { selector: "input[autocomplete~=username i]", type: "login" },
