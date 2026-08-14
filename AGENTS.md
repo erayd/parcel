@@ -39,13 +39,17 @@ Do not use `src/publicsuffix` as Parcel test guidance unless the task explicitly
 - Treat `src/publicsuffix` as a vendored upstream subtree. Ignore it for normal Parcel work unless the task is specifically about PSL data or its tooling.
 - Run `make prettier` after making any changes to ensure that they comply with the project's formatting conventions.
 - Always verify that the full `make test` suite passes before considering a task complete.
-- All new named functions and methods should be documented with JSDoc comments, including parameter types and return types. `@since` tags should refer to the next release version, not the current one.
-- Inline closures or anonymous functions should NOT be given a JSDoc comment, but they may have a brief // comment if the purpose is not obvious.
 - When making decisions, consider the long-term implications and maintainability of the code. Avoid short-term fixes that may introduce technical debt or future issues.
+
+## Comments
+
+- All new named functions and methods should be documented with JSDoc comments, including @since, parameter types and return types. `@since` tags should refer to the next release version, not the current one.
+- Inline closures or anonymous functions should NOT be given a JSDoc comment, but they may have a brief // comment if the purpose is not obvious.
 - Never refer to line numbers in comments; they become stale rapidly.
 - Inline TODO comments should be prefixed with uppercase `TODO:`, so that `make todo` will show them.
 - Multiline todo comments should have a first line consisting exclusively of a brief and self-contained description.
 - Do not wrap TODO comment lines with markdown emphasis (_, * etc).
+- Keep code comments brief and to-the-point. Do not write essays explaining behaviour - the code itself should already be clear and understandable.
 
 ## Security considerations
 
