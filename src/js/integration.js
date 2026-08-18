@@ -124,6 +124,16 @@
         }, 25_000);
     }
 
+    // Trigger the http-auth scrim popup from the background worker.
+    chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+        if (msg?.action === "trigger-http-auth") {
+            if (window !== window.top) return;
+            httpAuthTokens.add(msg.token);
+            triggerPopup(msg.token, 0, { centered: true }, "http-auth");
+            sendResponse({ ok: true });
+        }
+    });
+
     /**
      * Handle incoming "trigger" port connections (popup open/close, resize, and untargeted-click routing).
      * @since 1.0.0
@@ -504,7 +514,10 @@
     const PASSKEY_CONFLICT_DISMISSED_LIMIT = 1000;
 
     /** Popup modes rendered as a centred card over a fullscreen scrim that fades in and out. */
-    const SCRIM_MODES = new Set(["passkey", "passkey-conflict"]);
+    const SCRIM_MODES = new Set(["passkey", "passkey-conflict", "http-auth"]);
+
+    /** Per-challenge tokens for http-auth scrim popups, so the onConnect handler can identify them. */
+    const httpAuthTokens = new Set();
 
     /**
      * Remove a popup element from the page. Scrim popups (passkey ceremonies and conflict
@@ -1430,6 +1443,32 @@
         // passkey ceremony bindings are keyed by token, not by target element
         if (port.name !== "broadcast" && Object.prototype.hasOwnProperty.call(passkeyBindings, port.name)) {
             handlePasskeyPort(port, passkeyBindings[port.name], port.name);
+            return;
+        }
+
+        // http-auth scrim popup: no target binding — only resize and close.
+        // Handles both integration.js-created and executeScript-injected scrims.
+        if (httpAuthTokens.has(port.name)) {
+            httpAuthTokens.delete(port.name);
+            port.onMessage.addListener((msg) => {
+                const popup = document.querySelector(".parcel-popup");
+                if (!popup) return;
+                if (msg?.action === "resize") {
+                    popup._resizeFn?.(msg.width, msg.height);
+                } else if (msg?.action === "close" || msg?.action === "close-popup") {
+                    if (msg.cancelNavigation) {
+                        try {
+                            window.stop();
+                        } catch (_err) {
+                            // window.stop can throw if the page is in a transitional state
+                        }
+                    }
+                    removePopup(popup);
+                }
+            });
+            port.onDisconnect.addListener(() => {
+                chrome.runtime.lastError;
+            });
             return;
         }
 
