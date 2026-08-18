@@ -210,9 +210,9 @@ HOST_HASH="b7b76abadd3f13e6bcf554c39547d44ae19a299c8fc2e73ae8cbccd9a34d9b40"
 
 `.parcel.json` is a JSON file read by the main host script (`src/parcel-host`). It controls which password entries are visible to Parcel, how they are displayed, and several extension-level behaviours. The file is reloaded automatically when it changes.
 
-**Location:** `$PASSWORD_STORE_DIR/.parcel.json` If absent, the host treats it as `{}` and injects default rules of `[{ "pattern": "^passkeys/", "class": "passkey" }, { "pattern": "." }]` (passkey entries under the default `passkeyDir` are classed as passkeys; everything else is visible as logins).
+**Location:** `$PASSWORD_STORE_DIR/.parcel.json` If absent, the host treats it as `{}` and injects default rules of `[{ "pattern": "^passkeys/", "class": "passkey" }, { "pattern": "^cards/", "class": "card" }, { "pattern": "." }]` (passkey entries under the default `passkeyDir` are classed as passkeys; entries under `cards/` are classed as cards; everything else is visible as logins).
 
-*Note that if you do not configure a `passkey` rule, you will not be able to log in using passkeys.*
+*Note that if you do not configure a `passkey` rule, you will not be able to log in using passkeys. Similarly, if you do not specify a `card` rule, card-class entries will not appear when filling card form fields.*
 
 #### Rules
 
@@ -222,7 +222,7 @@ The `rules` array controls which password-store entries Parcel can see. Rules ar
 |----------|------|---------|-------------|
 | `pattern` | string (regex) | *required* | Regex matched against the entry name (relative to the store root, without `.gpg`). |
 | `ignore` | boolean | `false` | If `true`, entries matching this rule are excluded. |
-| `class` | string | `"login"` | `"login"` (fillable credential) or `"passkey"` (WebAuthn credential, excluded from filling; see [Passkeys](#passkeys-webauthn--fido2)). `"browser-passkey"` is a site-policy rule (not an entry class) that defers a site's ceremonies to the browser (see [Passkey conflicts](#passkey-conflicts-with-other-password-managers)). |
+| `class` | string | `"login"` | `"login"` (fillable credential), `"passkey"` (WebAuthn credential, excluded from filling; see [Passkeys](#passkeys-webauthn--fido2)), `"card"` (debit/credit card info), or `"browser-passkey"` (a site-policy rule, not an entry class, that defers a site's ceremonies to the browser; see [Passkey conflicts](#passkey-conflicts-with-other-password-managers)). |
 | `color` | string | `"333333"` | Hex colour for the entry's tag in the popup. |
 | `tag` | string | *(none)* | Optional label shown next to the entry in the popup. |
 | `strip` | string (regex) | *(none)* | Regex matching portions of the entry name to hide in the popup. |
@@ -257,6 +257,7 @@ Example `.parcel.json`:
   "rules": [
     { "pattern": "websites/.*" },
     { "pattern": "work/.*", "tag": "work", "color": "0055aa" },
+    { "pattern": "cards/.*", "class": "card" },
     { "pattern": "archive/.*", "ignore": true }
   ],
   "auditDecrypt": true,
