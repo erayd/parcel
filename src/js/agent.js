@@ -34,6 +34,9 @@ export class Agent extends EventTarget {
     #reconnectTimer = null;
     #destroyed = false;
     #pendingAuthCallbacks = new Map();
+    #bootstrapVersion = null;
+    /** @type {Set<chrome.runtime.Port>} Popup ports connected before the bootstrap version arrived. */
+    #pendingBootstrapPorts = new Set();
 
     /**
      * Construct a new Agent instance.
@@ -42,7 +45,20 @@ export class Agent extends EventTarget {
     constructor() {
         super();
 
-        this.addEventListener("parcel::native::bootstrap", () => this.#init());
+        this.addEventListener("parcel::native::bootstrap", (ev) => {
+            this.#bootstrapVersion = ev.detail?.version ?? null;
+            // Flush pending popup ports that connected before the version arrived.
+            if (this.#pendingBootstrapPorts.size > 0) {
+                const version = this.#bootstrapVersion;
+                for (const port of this.#pendingBootstrapPorts) {
+                    if (version !== null) {
+                        port.postMessage({ action: "bootstrap-status", version });
+                    }
+                }
+                this.#pendingBootstrapPorts.clear();
+            }
+            this.#init();
+        });
         chrome.runtime.onConnect.addListener((port) => this.#connect(port));
         if (chrome.contextualIdentities?.onRemoved) {
             chrome.contextualIdentities.onRemoved.addListener((changeInfo) =>
@@ -598,6 +614,17 @@ export class Agent extends EventTarget {
         const clearStatus = () => port.postMessage({ action: "clear-status" });
         const clearErrors = (category = null) => port.postMessage({ action: "clear-errors", category });
         clearStatus();
+
+        // Push the bootstrap version so the popup can warn about outdated hosts.
+        // If the version hasn't arrived yet, defer until the bootstrap event fires.
+        if (port.name === "popup") {
+            if (this.#bootstrapVersion !== null) {
+                port.postMessage({ action: "bootstrap-status", version: this.#bootstrapVersion });
+            } else {
+                this.#pendingBootstrapPorts.add(port);
+                port.onDisconnect.addListener(() => this.#pendingBootstrapPorts.delete(port));
+            }
+        }
 
         // Allow-list: map port names to the actions they are permitted to invoke.
         // `decrypt`/`match` are privileged and only available to authorised popup ports;
