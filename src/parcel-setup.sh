@@ -349,9 +349,11 @@ resolve_install_level() {
         return
     fi
 
-    # Interactive: ask whether to install system-wide
-    if prompt_yesno "Install system-wide? (requires sudo)" true; then
-        log_info "Re-running with sudo for system-wide installation..."
+    # Interactive: ask whether to operate system-wide
+    local verb="Install"
+    [ "$ACTION" = "uninstall" ] && verb="Uninstall"
+    if prompt_yesno "$verb system-wide? (requires sudo)" true; then
+        log_info "Re-running with sudo for system-wide $ACTION..."
         exec sudo "$0" --system "$@"
     fi
     INSTALL_LEVEL="user"
