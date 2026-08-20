@@ -148,6 +148,12 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Pretty-print JSON from stdin, indented under the log_info prefix.
+# @since 1.0.7
+indent_json() {
+    jq '.' | sed 's/^/      /'
+}
+
 # Register a temp file for cleanup on exit.
 # @param {string} path - Temp file path.
 # @since 1.0.7
@@ -872,7 +878,7 @@ preview_install() {
             log_info "  Generate & install native messaging manifests:"
             local name
             for name in $DETECTED_BROWSERS; do
-                local browser_json manifest_dir
+                local browser_json manifest_dir engine ext_id
                 browser_json="$(get_browser_config "$name")"
                 local key
                 key="$(manifest_key)"
@@ -880,6 +886,15 @@ preview_install() {
                 manifest_dir="$(expand_tilde "$manifest_dir")"
                 local manifest_path="$manifest_dir/$HOST_NAME.json"
                 log_info "    $name: $manifest_path"
+                if $VERBOSE; then
+                    engine="$(browser_field "$browser_json" '.engine')"
+                    if [ "$engine" = "chromium" ]; then
+                        ext_id="$EXT_ID_CHROMIUM"
+                    else
+                        ext_id="$EXT_ID_FIREFOX"
+                    fi
+                    generate_manifest "$engine" "$HOST_BIN_PATH" "$HOST_NAME" "$ext_id" false | indent_json >&2
+                fi
             done
             printf '\n' >&2
         fi
