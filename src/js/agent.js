@@ -32,6 +32,7 @@ export class Agent extends EventTarget {
     #nativePingInterval = null;
     #nativePingFailures = 0;
     #reconnectTimer = null;
+    #initRetries = 0;
     #destroyed = false;
     #pendingAuthCallbacks = new Map();
     #bootstrapVersion = null;
@@ -164,12 +165,55 @@ export class Agent extends EventTarget {
             this.#setConfig(await this.#callNative("configure", {}, 10_000));
             this.#startNativePing();
             this.#initError = null;
+            this.#initRetries = 0;
             this.dispatchEvent(new CustomEvent("ready"));
         } catch (err) {
             this.#initError = err;
             console.error(`Agent initialisation failed: ${err.message}`);
             this.dispatchEvent(new CustomEvent("initFailed", { detail: err.message }));
+            // re-attempt init with exponential backoff
+            this.#initRetries++;
+            this.#scheduleReconnect(Math.min(5_000 * 2 ** (this.#initRetries - 1), 60_000));
         }
+    }
+
+    /**
+     * Schedule a native-host reconnect, replacing any pending reconnect.
+     *
+     * If the current connection is still considered live (e.g. init failed
+     * against a wedged host that never disconnected), the port is forcibly
+     * disconnected so the retry spawns a fresh host process; the resulting
+     * `#onNativeDisconnect` then schedules the actual reconnect on its normal
+     * short timer. Should the browser never deliver `onDisconnect` for the
+     * forced disconnect, an identity-guarded fallback clears the stale state
+     * and reconnects, so the agent cannot wedge with a dead-but-flagged-live
+     * port while no ping watchdog is running.
+     * @since 1.0.7
+     * @param {number} delay - Time to wait before reconnecting, in milliseconds.
+     * @returns {void}
+     */
+    #scheduleReconnect(delay) {
+        if (this.#destroyed) return;
+        if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
+        this.#reconnectTimer = setTimeout(() => {
+            this.#reconnectTimer = null;
+            if (this.#connectedNative && this.#host) {
+                const host = this.#host;
+                try {
+                    host.disconnect();
+                } catch (_err) {
+                    // already disconnected; nothing to clean up
+                }
+                // Fallback if onDisconnect is never delivered for the forced disconnect
+                setTimeout(() => {
+                    if (!this.#destroyed && this.#connectedNative && this.#host === host) {
+                        this.#connectedNative = false;
+                        this.#ensureNativeConnected();
+                    }
+                }, 1000);
+            }
+            this.#ensureNativeConnected();
+        }, delay);
     }
 
     /**
@@ -368,12 +412,7 @@ export class Agent extends EventTarget {
         // terminated inside this 1s window; on the next cold start the
         // constructor re-runs #connectNative() anyway, so correctness is
         // preserved either way.
-        if (!this.#destroyed) {
-            this.#reconnectTimer = setTimeout(() => {
-                this.#reconnectTimer = null;
-                this.#ensureNativeConnected();
-            }, 1000);
-        }
+        this.#scheduleReconnect(1000);
     }
 
     /**
