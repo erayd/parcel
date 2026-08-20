@@ -231,7 +231,10 @@ prompt_yesno() {
     response="$(printf '%s' "$response" | tr '[:upper:]' '[:lower:]')"
     case "$response" in
         y|yes) return 0 ;;
-        n|no|'') return 1 ;;
+        n|no) return 1 ;;
+        '')
+            if $default_no; then return 1; else return 0; fi
+            ;;
         *) return 1 ;;
     esac
 }
