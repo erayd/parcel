@@ -37,7 +37,7 @@ BROWSER_FILTER=""
 YES=false
 FLATPAK_ONLY=false
 REMOVE_CONFIG=false
-DEBUG=false
+VERBOSE=false
 
 # Detected platform
 OS=""
@@ -384,7 +384,7 @@ parse_args() {
             --uninstall) ACTION="uninstall" ;;
             --remove-config) REMOVE_CONFIG=true ;;
             --flatpak-only) FLATPAK_ONLY=true ;;
-            --debug) DEBUG=true ;;
+            --verbose) VERBOSE=true ;;
             --help|-h)
                 print_usage
                 exit 0
@@ -421,7 +421,7 @@ Install options:
   --browser <name>    Set up only the specified browser(s) (comma or space separated)
   --flatpak-only      Only handle flatpak browsers (skip native)
   --yes, -y           Non-interactive: accept all detected defaults
-  --debug             Show verbose output (e.g. full password-store tree)
+  --verbose           Show verbose output (e.g. full password-store tree)
 
 Actions:
   --uninstall         Remove the installation (preserves parcelrc and .parcel.json)
@@ -1656,7 +1656,7 @@ run_config_builder() {
 
     # Show directory structure
     printf '\n' >&2
-    if $DEBUG; then
+    if $VERBOSE; then
         log_info "Directory structure:"
         local dir
         while IFS= read -r dir; do
