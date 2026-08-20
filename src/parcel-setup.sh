@@ -204,7 +204,7 @@ prompt() {
     else
         printf '%s: ' "$prompt_msg" >&2
     fi
-    read -r response
+    read -r response </dev/tty
     printf '%s' "${response:-$default_val}"
 }
 
@@ -227,7 +227,7 @@ prompt_yesno() {
     fi
     local response
     printf '%s [%s]: ' "$prompt_msg" "$hint" >&2
-    read -r response
+    read -r response </dev/tty
     response="$(printf '%s' "$response" | tr '[:upper:]' '[:lower:]')"
     case "$response" in
         y|yes) return 0 ;;
@@ -742,6 +742,60 @@ detect_tool_paths() {
     fi
 }
 
+# Ask the user to confirm each detected browser (default Y).
+# Filters DETECTED_BROWSERS and DETECTED_FLATPAK_BROWSERS to only include
+# confirmed entries. Skipped entirely in --yes mode.
+# @since 1.0.7
+confirm_browsers() {
+    if $YES; then
+        return
+    fi
+
+    local confirmed=""
+
+    if [ -n "$DETECTED_BROWSERS" ]; then
+        printf '\n' >&2
+        log_info "Confirm which browsers to set up:"
+        local name
+        while IFS= read -r name; do
+            [ -z "$name" ] && continue
+            if prompt_yesno "  Set up $name?" false; then
+                if [ -n "$confirmed" ]; then
+                    confirmed="$confirmed$newline$name"
+                else
+                    confirmed="$name"
+                fi
+            else
+                log_info "    Skipping $name"
+            fi
+        done <<< "$DETECTED_BROWSERS"
+        DETECTED_BROWSERS="$confirmed"
+    fi
+
+    if [ -n "$DETECTED_FLATPAK_BROWSERS" ]; then
+        confirmed=""
+        if [ -z "$DETECTED_BROWSERS" ]; then
+            printf '\n' >&2
+        fi
+        log_info "Confirm which flatpak browsers to set up:"
+        local app_id display_name
+        while IFS= read -r app_id; do
+            [ -z "$app_id" ] && continue
+            display_name="$(config_query ".flatpak.browsers[] | select(.appId == \"$app_id\") | .name")"
+            if prompt_yesno "  Set up $display_name (flatpak)?" false; then
+                if [ -n "$confirmed" ]; then
+                    confirmed="$confirmed$newline$app_id"
+                else
+                    confirmed="$app_id"
+                fi
+            else
+                log_info "    Skipping $display_name (flatpak)"
+            fi
+        done <<< "$DETECTED_FLATPAK_BROWSERS"
+        DETECTED_FLATPAK_BROWSERS="$confirmed"
+    fi
+}
+
 # Run browser and tool detection.
 # Platform, dependencies, prefix, and password store are already detected
 # by main(), so this only runs the browser/tool-specific detection.
@@ -752,6 +806,7 @@ run_detect() {
 
     detect_browsers
     detect_flatpak_browsers
+    confirm_browsers
     detect_tool_paths
     offer_host_hash
 }
