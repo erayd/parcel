@@ -113,7 +113,7 @@ make clean
 
 Parcel uses a native-messaging host to communicate with `gpg` and your password store. The recommended way to install it is with the setup script from the [latest release](https://github.com/erayd/parcel/releases).
 
-The setup script is a single self-contained file with the bootstrap host and browser configuration embedded inside it. It is GPG-signed as part of the release process, and the signature transitively covers the embedded bootstrap host — no separate verification is needed.
+The setup script is a single self-contained file with the bootstrap host and browser configuration embedded inside it.
 
 **1. Download and verify the script:**
 
