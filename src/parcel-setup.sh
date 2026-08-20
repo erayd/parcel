@@ -330,10 +330,38 @@ browser_field() {
 # CLI argument parsing
 # ===========================================================================
 
+# Resolve the install level when no explicit --system/--user flag was given.
+# In non-interactive (--yes) mode, for the config action, or when already
+# running as root, auto-detects without prompting. Otherwise asks the user and
+# re-execs with sudo if system-wide is chosen.
+# @param {string[]} orig_args - Original CLI arguments, preserved for re-exec.
+# @since 1.0.7
+resolve_install_level() {
+    # Already root: system is the natural default, no prompt needed
+    if [ "$(id -u)" -eq 0 ]; then
+        INSTALL_LEVEL="system"
+        return
+    fi
+
+    # Non-interactive or config-only: no prompt needed
+    if $YES || [ "$ACTION" = "config" ]; then
+        INSTALL_LEVEL="user"
+        return
+    fi
+
+    # Interactive: ask whether to install system-wide
+    if prompt_yesno "Install system-wide? (requires sudo)" true; then
+        log_info "Re-running with sudo for system-wide installation..."
+        exec sudo "$0" --system "$@"
+    fi
+    INSTALL_LEVEL="user"
+}
+
 # Parse command-line arguments.
 # Sets global variables for action, install level, browser filter, etc.
 # @since 1.0.7
 parse_args() {
+    local orig_args=("$@")
     while [ $# -gt 0 ]; do
         case "$1" in
             --system) INSTALL_LEVEL="system" ;;
@@ -368,13 +396,9 @@ parse_args() {
         shift
     done
 
-    # Resolve install level defaults
+    # Resolve install level when not explicitly specified
     if [ -z "$INSTALL_LEVEL" ]; then
-        if [ "$(id -u)" -eq 0 ]; then
-            INSTALL_LEVEL="system"
-        else
-            INSTALL_LEVEL="user"
-        fi
+        resolve_install_level "${orig_args[@]}"
     fi
     RESOLVED_LEVEL="$INSTALL_LEVEL"
 
@@ -391,8 +415,8 @@ print_usage() {
 Usage: parcel-setup.sh [options]
 
 Install options:
-  --system            Install system-wide (default if running as root, requires sudo)
-  --user              Install user-level (no sudo needed)
+  --system            Install system-wide (requires sudo, will prompt if omitted)
+  --user              Install user-level (no sudo needed, no prompt if omitted)
   --prefix <path>     Custom installation prefix
   --browser <name>    Set up only the specified browser(s) (comma or space separated)
   --flatpak-only      Only handle flatpak browsers (skip native)
