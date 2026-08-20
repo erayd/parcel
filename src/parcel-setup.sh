@@ -1801,7 +1801,7 @@ run_config_builder() {
     # Ask about non-rule settings
     local passkey_dir allow_links allow_external_links audit_decrypt
     local git_in_passkey handle_http_auth handle_passkeys save_history
-    local fill_related disable_context_popup default_rules
+    local fill_related disable_context_popup
 
     passkey_dir="$(prompt "passkeyDir" "$(printf '%s' "$config_json" | jq -r '.passkeyDir // "passkeys"')")"
     allow_links="$(prompt "allowLinks (true/false)" "$(printf '%s' "$config_json" | jq -r '.allowLinks // false')")"
@@ -1813,7 +1813,6 @@ run_config_builder() {
     save_history="$(prompt "saveHistory (true/false)" "$(printf '%s' "$config_json" | jq -r '.saveHistory // true')")"
     fill_related="$(prompt "fillRelated (true/false)" "$(printf '%s' "$config_json" | jq -r '.fillRelated // true')")"
     disable_context_popup="$(prompt "disableContextPopup (true/false)" "$(printf '%s' "$config_json" | jq -r '.disableContextPopup // false')")"
-    default_rules="$(prompt "defaultRules (true/false)" "$(printf '%s' "$config_json" | jq -r '.defaultRules // false')")"
 
     # Normalise booleans
     normalise_bool() {
@@ -1832,12 +1831,11 @@ run_config_builder() {
     save_history="$(normalise_bool "$save_history")"
     fill_related="$(normalise_bool "$fill_related")"
     disable_context_popup="$(normalise_bool "$disable_context_popup")"
-    default_rules="$(normalise_bool "$default_rules")"
 
     # Build the final config. Only include a setting if:
     #   - it was already present in the existing .parcel.json, OR
     #   - the user's value differs from the schema default
-    # passdir and modified are internal, never written.
+    # passdir, modified, and defaultRules are internal, never written.
     local final_config
     final_config="$(printf '%s' "$config_json" | jq \
         --arg passkeyDir "$passkey_dir" \
@@ -1850,11 +1848,10 @@ run_config_builder() {
         --argjson saveHistory "$save_history" \
         --argjson fillRelated "$fill_related" \
         --argjson disableContextPopup "$disable_context_popup" \
-        --argjson defaultRules "$default_rules" \
         --argjson rules "$rules_json" \
         '
         # Start from existing config, strip internal fields
-        del(.passdir, .modified)
+        del(.passdir, .modified, .defaultRules)
         # Only set each field if value differs from default or was already present
         | if $allowLinks != false or has("allowLinks") then .allowLinks = $allowLinks else del(.allowLinks) end
         | if $allowExternalLinks != false or has("allowExternalLinks") then .allowExternalLinks = $allowExternalLinks else del(.allowExternalLinks) end
@@ -1865,7 +1862,6 @@ run_config_builder() {
         | if $saveHistory != true or has("saveHistory") then .saveHistory = $saveHistory else del(.saveHistory) end
         | if $fillRelated != true or has("fillRelated") then .fillRelated = $fillRelated else del(.fillRelated) end
         | if $disableContextPopup != false or has("disableContextPopup") then .disableContextPopup = $disableContextPopup else del(.disableContextPopup) end
-        | if $defaultRules != false or has("defaultRules") then .defaultRules = $defaultRules else del(.defaultRules) end
         | if $passkeyDir != "passkeys" or has("passkeyDir") then .passkeyDir = $passkeyDir else del(.passkeyDir) end
         | .rules = $rules
         ')"
