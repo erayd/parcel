@@ -35,7 +35,7 @@ lint:
 .PHONY: clean
 clean:
 	$(MAKE) -C ./src clean
-	rm -rvf dist chrome firefox
+	rm -rvf dist chrome firefox parcel-setup.sh
 
 .PHONY: chrome
 chrome: extension
@@ -60,8 +60,12 @@ firefox: extension
 	        ) \
 	        " src/dist/manifest.json > firefox/manifest.json
 
+.PHONY: setup
+setup:
+	./scripts/generate-setup.sh
+
 .PHONY: release
-release: clean extension
+release: clean extension setup
 ifeq ($(VERSION), $(CURRENT_VERSION))
 else
 	echo $(VERSION) > .version
@@ -79,6 +83,7 @@ endif
 	(cd chrome && zip -r ../dist/parcel-chrome-$(VERSION).zip *)
 	(cd firefox && zip -r ../dist/parcel-firefox-$(VERSION).zip *)
 	install -m 755 -D -t dist parcel-host
+	install -m 755 -D -t dist parcel-setup.sh
 	for file in dist/*; do gpg --detach-sign --armor "$$file"; done
 
 .PHONY: todo

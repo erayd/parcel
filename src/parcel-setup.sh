@@ -1,0 +1,1856 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+# ISC License
+#
+# Copyright (c) 2023-2026 Erayd LTD
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+# Parcel setup script.
+#
+# In the distributed form, this file is preceded by a preamble that sets
+# BOOTSTRAP_HOST, SETUP_CONFIG, and SIGNED_HOST_SHA256. In development, those
+# variables are unset and the script falls back to reading from source files.
+#
+# @since 1.0.7
+
+# ===========================================================================
+# Global state
+# ===========================================================================
+
+# CLI arguments
+ACTION="install"
+INSTALL_LEVEL=""
+PREFIX_OVERRIDE=""
+BROWSER_FILTER=""
+YES=false
+FLATPAK_ONLY=false
+REMOVE_CONFIG=false
+DEBUG=false
+
+# Detected platform
+OS=""
+ARCH=""
+
+# Resolved install configuration
+RESOLVED_LEVEL="system"
+RESOLVED_PREFIX=""
+HOST_BIN_PATH=""
+HOST_BIN_DIR=""
+SERVICES_USER="${SUDO_USER:-}"
+
+# Detected browsers
+DETECTED_BROWSERS=""
+DETECTED_FLATPAK_BROWSERS=""
+HAS_FLATPAK=false
+
+# Detected configuration
+PASSWORD_STORE_DIR=""
+CUSTOM_GPG=""
+CUSTOM_JQ=""
+CUSTOM_PASSWORD_STORE_DIR=""
+WANTS_HOST_HASH=false
+
+# Parsed config values
+HOST_NAME=""
+EXT_ID_CHROMIUM=""
+EXT_ID_FIREFOX=""
+
+# Tracking
+PHASE="init"
+TEMP_FILES=""
+INSTALL_ERRORS=0
+APPLIED_CHANGES=""
+
+# Config data (set by preamble in distributed form, or loaded in dev mode)
+# shellcheck disable=SC2034
+BOOTSTRAP_HOST="${BOOTSTRAP_HOST:-}"
+SETUP_CONFIG="${SETUP_CONFIG:-}"
+SIGNED_HOST_SHA256="${SIGNED_HOST_SHA256:-}"
+
+# ===========================================================================
+# Utility functions
+# ===========================================================================
+
+# Print an informational message to stderr.
+# @param {string} msg - Message to print.
+# @since 1.0.7
+log_info() {
+    printf '  %s\n' "$*" >&2
+}
+
+# Print a success message to stderr.
+# @param {string} msg - Message to print.
+# @since 1.0.7
+log_success() {
+    printf '  \033[32m✓\033[0m %s\n' "$*" >&2
+}
+
+# Print a warning message to stderr.
+# @param {string} msg - Message to print.
+# @since 1.0.7
+log_warn() {
+    printf '  \033[33m!\033[0m %s\n' "$*" >&2
+}
+
+# Print an error message to stderr.
+# @param {string} msg - Message to print.
+# @since 1.0.7
+log_error() {
+    printf '  \033[31m✗\033[0m %s\n' "$*" >&2
+}
+
+# Print a section header.
+# @param {string} title - Section title.
+# @since 1.0.7
+log_section() {
+    printf '\n\033[1m=== %s ===\033[0m\n\n' "$1" >&2
+}
+
+# Exit with an error message and exit code.
+# @param {string} msg - Error message.
+# @param {number} [code=1] - Exit code.
+# @since 1.0.7
+die() {
+    log_error "$1"
+    exit "${2:-1}"
+}
+
+# Expand a leading ~ to $HOME.
+# @param {string} path - Path that may start with ~.
+# @returns {string} Expanded path on stdout.
+# @since 1.0.7
+expand_tilde() {
+    local path="$1"
+    case "$path" in
+        \~) printf '%s\n' "$HOME" ;;
+        \~/*) printf '%s%s\n' "$HOME" "${path#\~}" ;;
+        *) printf '%s\n' "$path" ;;
+    esac
+}
+
+# Check if a command exists on PATH.
+# @param {string} cmd - Command name.
+# @returns {boolean} 0 if found, 1 otherwise.
+# @since 1.0.7
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Register a temp file for cleanup on exit.
+# @param {string} path - Temp file path.
+# @since 1.0.7
+add_temp() {
+    TEMP_FILES="$TEMP_FILES $1"
+}
+
+# Create a temp file and register it for cleanup.
+# @returns {string} Path to temp file on stdout.
+# @since 1.0.7
+make_temp() {
+    local tmp
+    tmp="$(mktemp)" || die "Failed to create temp file"
+    add_temp "$tmp"
+    printf '%s' "$tmp"
+}
+
+# Normalise the OS name from uname.
+# @returns {string} darwin | linux | bsd
+# @since 1.0.7
+normalize_os() {
+    local kernel
+    kernel="$(uname -s)"
+    case "$kernel" in
+        Darwin) printf 'darwin' ;;
+        Linux) printf 'linux' ;;
+        FreeBSD|OpenBSD|NetBSD|DragonFly) printf 'bsd' ;;
+        *) printf '%s' "$kernel" | tr '[:upper:]' '[:lower:]' ;;
+    esac
+}
+
+# Normalise the architecture from uname.
+# @returns {string} x86_64 | arm64 | aarch64 | i386
+# @since 1.0.7
+normalize_arch() {
+    uname -m
+}
+
+# Prompt the user for a string value (or return default in --yes mode).
+# @param {string} prompt_msg - Prompt text.
+# @param {string} [default_val] - Default value.
+# @returns {string} User input or default on stdout.
+# @since 1.0.7
+prompt() {
+    local prompt_msg="$1"
+    local default_val="${2:-}"
+    if $YES; then
+        printf '%s' "$default_val"
+        return
+    fi
+    local response
+    if [ -n "$default_val" ]; then
+        printf '%s [%s]: ' "$prompt_msg" "$default_val" >&2
+    else
+        printf '%s: ' "$prompt_msg" >&2
+    fi
+    read -r response
+    printf '%s' "${response:-$default_val}"
+}
+
+# Prompt for a yes/no answer (or return default in --yes mode).
+# @param {string} prompt_msg - Prompt text.
+# @param {boolean} [default_no=true] - Default answer (true=no).
+# @returns {boolean} 0 if yes, 1 if no.
+# @since 1.0.7
+prompt_yesno() {
+    local prompt_msg="$1"
+    local default_no="${2:-true}"
+    if $YES; then
+        if $default_no; then return 1; else return 0; fi
+    fi
+    local hint
+    if $default_no; then
+        hint="y/N"
+    else
+        hint="Y/n"
+    fi
+    local response
+    printf '%s [%s]: ' "$prompt_msg" "$hint" >&2
+    read -r response
+    response="$(printf '%s' "$response" | tr '[:upper:]' '[:lower:]')"
+    case "$response" in
+        y|yes) return 0 ;;
+        n|no|'') return 1 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Check if a browser is in the user-specified filter.
+# @param {string} name - Browser name.
+# @returns {boolean} 0 if browser should be processed.
+# @since 1.0.7
+browser_in_filter() {
+    local name="$1"
+    [ -z "$BROWSER_FILTER" ] && return 0
+    case " $BROWSER_FILTER " in
+        *" $name "*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Get the manifest directory key for the current OS and install level.
+# @returns {string} e.g. darwin-system, linux-user, bsd-system
+# @since 1.0.7
+manifest_key() {
+    local os_key="$OS"
+    [ "$os_key" = "bsd" ] && os_key="linux"
+    printf '%s-%s' "$os_key" "$RESOLVED_LEVEL"
+}
+
+# ===========================================================================
+# Dev-mode fallback: load embedded data from source files
+# ===========================================================================
+
+# Determine the script's own directory for dev-mode file lookups.
+# In the distributed form the variables are set by the preamble.
+# @since 1.0.7
+load_dev_fallback() {
+    if [ -z "$BOOTSTRAP_HOST" ] || [ -z "$SETUP_CONFIG" ] || [ -z "$SIGNED_HOST_SHA256" ]; then
+        local script_dir
+        script_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+        local repo_root
+        repo_root="$(cd "$script_dir/.." 2>/dev/null && pwd)"
+
+        if [ -z "$SETUP_CONFIG" ] && [ -f "$script_dir/parcel-setup.json" ]; then
+            SETUP_CONFIG="$(cat "$script_dir/parcel-setup.json")"
+        fi
+        if [ -z "$BOOTSTRAP_HOST" ] && [ -f "$repo_root/parcel-host" ]; then
+            BOOTSTRAP_HOST="$(cat "$repo_root/parcel-host")"
+        fi
+        if [ -z "$SIGNED_HOST_SHA256" ] && [ -f "$script_dir/parcel-host" ]; then
+            local hash_bin
+            hash_bin="$(command -v sha256sum 2>/dev/null || command -v sha256 2>/dev/null)"
+            if [ -n "$hash_bin" ]; then
+                SIGNED_HOST_SHA256="$("$hash_bin" "$script_dir/parcel-host" 2>/dev/null | awk '{print $1}')"
+            fi
+        fi
+        log_warn "Running in development mode (reading from source files)"
+    fi
+}
+
+# ===========================================================================
+# Config access (jq wrappers)
+# ===========================================================================
+
+# Query the embedded JSON config with jq.
+# @param {string} filter - jq filter expression.
+# @param {string} [input] - Optional stdin input (defaults to $SETUP_CONFIG).
+# @returns {string} jq output.
+# @since 1.0.7
+config_query() {
+    local filter="$1"
+    if [ -n "${2:-}" ]; then
+        printf '%s' "$2" | jq -r "$filter"
+    else
+        printf '%s' "$SETUP_CONFIG" | jq -r "$filter"
+    fi
+}
+
+# Get a browser definition from the config by name.
+# @param {string} name - Browser name.
+# @returns {string} JSON object for the browser.
+# @since 1.0.7
+get_browser_config() {
+    config_query ".browsers[] | select(.name == \"$1\")"
+}
+
+# Get the value of a field from a browser definition.
+# @param {string} browser_json - Browser JSON (from get_browser_config).
+# @param {string} field - jq filter for the field.
+# @returns {string} Field value.
+# @since 1.0.7
+browser_field() {
+    local browser_json="$1"
+    local field="$2"
+    printf '%s' "$browser_json" | jq -r "$field"
+}
+
+# ===========================================================================
+# CLI argument parsing
+# ===========================================================================
+
+# Parse command-line arguments.
+# Sets global variables for action, install level, browser filter, etc.
+# @since 1.0.7
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --system) INSTALL_LEVEL="system" ;;
+            --user) INSTALL_LEVEL="user" ;;
+            --prefix) shift; PREFIX_OVERRIDE="$1" ;;
+            --browser)
+                shift
+                if [ -z "$BROWSER_FILTER" ]; then
+                    BROWSER_FILTER="$1"
+                else
+                    BROWSER_FILTER="$BROWSER_FILTER $1"
+                fi
+                ;;
+            --browser=*)
+                BROWSER_FILTER="${1#*=}"
+                BROWSER_FILTER="${BROWSER_FILTER//,/ }"
+                ;;
+            --yes|-y) YES=true ;;
+            --create-config) ACTION="config" ;;
+            --uninstall) ACTION="uninstall" ;;
+            --remove-config) REMOVE_CONFIG=true ;;
+            --flatpak-only) FLATPAK_ONLY=true ;;
+            --debug) DEBUG=true ;;
+            --help|-h)
+                print_usage
+                exit 0
+                ;;
+            *)
+                die "Unknown option: $1 (see --help)"
+                ;;
+        esac
+        shift
+    done
+
+    # Resolve install level defaults
+    if [ -z "$INSTALL_LEVEL" ]; then
+        if [ "$(id -u)" -eq 0 ]; then
+            INSTALL_LEVEL="system"
+        else
+            INSTALL_LEVEL="user"
+        fi
+    fi
+    RESOLVED_LEVEL="$INSTALL_LEVEL"
+
+    # Apply prefix override
+    if [ -n "$PREFIX_OVERRIDE" ]; then
+        RESOLVED_PREFIX="$(expand_tilde "$PREFIX_OVERRIDE")"
+    fi
+}
+
+# Print usage information.
+# @since 1.0.7
+print_usage() {
+    cat >&2 <<'USAGE'
+Usage: parcel-setup.sh [options]
+
+Install options:
+  --system            Install system-wide (default if running as root, requires sudo)
+  --user              Install user-level (no sudo needed)
+  --prefix <path>     Custom installation prefix
+  --browser <name>    Set up only the specified browser(s) (comma or space separated)
+  --flatpak-only      Only handle flatpak browsers (skip native)
+  --yes, -y           Non-interactive: accept all detected defaults
+  --debug             Show verbose output (e.g. full password-store tree)
+
+Actions:
+  --uninstall         Remove the installation (preserves parcelrc and .parcel.json)
+  --remove-config     With --uninstall: also remove config files
+  --create-config     Run the .parcel.json config builder
+
+  -h, --help          Show this help message
+USAGE
+}
+
+# ===========================================================================
+# Platform detection
+# ===========================================================================
+
+# Detect the operating system and architecture.
+# @since 1.0.7
+detect_platform() {
+    OS="$(normalize_os)"
+    ARCH="$(normalize_arch)"
+
+    case "$OS" in
+        darwin|linux|bsd) ;;
+        *)
+            die "Unsupported operating system: $(uname -s). Supported: macOS, Linux, BSD"
+            ;;
+    esac
+
+    log_success "Platform: $OS ($ARCH)"
+}
+
+# ===========================================================================
+# Dependency checks
+# ===========================================================================
+
+# Verify required dependencies are available.
+# @since 1.0.7
+check_dependencies() {
+    local missing=""
+
+    if ! command_exists jq; then
+        missing="$missing jq"
+    fi
+    if ! command_exists gpg; then
+        missing="$missing gpg"
+    fi
+
+    # sha256 is needed by the bootstrap host; check for it here so we can
+    # give a better error message, but it is not fatal for the setup script.
+    if ! command_exists sha256sum && ! command_exists sha256; then
+        log_warn "Neither sha256sum nor sha256 found — the bootstrap host may not function correctly"
+    fi
+
+    if [ -n "$missing" ]; then
+        for dep in $missing; do
+            case "$dep" in
+                jq)
+                    log_error "jq is required but was not found"
+                    if [ "$OS" = "darwin" ]; then
+                        log_info "  jq should be available on macOS. If it's missing, install it via:"
+                        log_info "    brew install jq"
+                    else
+                        log_info "  Install jq via your package manager, e.g.:"
+                        log_info "    apt install jq / dnf install jq / pacman -S jq"
+                    fi
+                    ;;
+                gpg)
+                    log_error "gpg is required but was not found"
+                    if [ "$OS" = "darwin" ]; then
+                        log_info "  Install GPG via one of:"
+                        log_info "    brew install gnupg"
+                        log_info "    GPG Suite: https://gpgtools.org"
+                    else
+                        log_info "  Install GPG via your package manager, e.g.:"
+                        log_info "    apt install gnupg / dnf install gnupg / pacman -S gnupg"
+                    fi
+                    ;;
+            esac
+        done
+        die "Missing required dependencies. Install them and re-run."
+    fi
+
+    log_success "Dependencies: jq $(jq --version 2>/dev/null || echo '?'), gpg $(gpg --version 2>/dev/null | head -1 || echo '?')"
+
+    # Detect flatpak
+    if command_exists flatpak; then
+        HAS_FLATPAK=true
+    fi
+}
+
+# ===========================================================================
+# Phase 1: DETECT
+# ===========================================================================
+
+# Resolve the install prefix based on level and platform.
+# Sets RESOLVED_PREFIX, HOST_BIN_DIR, HOST_BIN_PATH.
+# @since 1.0.7
+resolve_prefix() {
+    if [ -n "$RESOLVED_PREFIX" ]; then
+        :
+    elif [ "$RESOLVED_LEVEL" = "system" ]; then
+        RESOLVED_PREFIX="/usr/local"
+    else
+        RESOLVED_PREFIX="$HOME/.local"
+    fi
+
+    HOST_BIN_DIR="$RESOLVED_PREFIX/bin"
+    HOST_BIN_PATH="$HOST_BIN_DIR/parcel-host"
+
+    # Check write access
+    if [ "$RESOLVED_LEVEL" = "system" ] && [ "$(id -u)" -ne 0 ]; then
+        if $YES; then
+            die "System install requires root (re-run with sudo, or use --user)"
+        fi
+        die "System install requires root. Re-run with sudo, or use --user for a user-level install."
+    fi
+
+    log_success "Install prefix: $RESOLVED_PREFIX ($RESOLVED_LEVEL)"
+}
+
+# Detect installed browsers from the config.
+# Populates DETECTED_BROWSERS with newline-separated browser names.
+# @since 1.0.7
+detect_browsers() {
+    local browser_count
+    browser_count="$(config_query '.browsers | length')"
+
+    local i=0
+    while [ "$i" -lt "$browser_count" ]; do
+        local name engine browser_json
+        name="$(config_query ".browsers[$i].name")"
+        engine="$(config_query ".browsers[$i].engine")"
+
+        # Skip if not in filter
+        if ! browser_in_filter "$name"; then
+            i=$((i + 1))
+            continue
+        fi
+
+        # Skip flatpak-only mode for native detection
+        if $FLATPAK_ONLY; then
+            i=$((i + 1))
+            continue
+        fi
+
+        # Get OS-specific detection paths
+        local os_key="$OS"
+        [ "$os_key" = "bsd" ] && os_key="linux"
+        local detect_paths
+        detect_paths="$(config_query ".browsers[$i].detect[\"$os_key\"][]?")"
+
+        if [ -z "$detect_paths" ]; then
+            i=$((i + 1))
+            continue
+        fi
+
+        # Check if any detection path exists
+        local found=false
+        while IFS= read -r path; do
+            if [ -e "$path" ]; then
+                found=true
+                break
+            fi
+        done <<< "$detect_paths"
+
+        # Also check if a Parcel manifest already exists (i.e. Parcel was
+        # previously set up for this browser even if the browser is no longer
+        # detectable via its binary). This avoids false positives from
+        # NativeMessagingHosts directories created by other tools.
+        if ! $found; then
+            local manifest_key
+            manifest_key="$(manifest_key)"
+            local manifest_dir
+            manifest_dir="$(config_query ".browsers[$i].manifestDir[\"$manifest_key\"]?")"
+            if [ -n "$manifest_dir" ]; then
+                local resolved_manifest_dir
+                resolved_manifest_dir="$(expand_tilde "$manifest_dir")"
+                if [ -f "$resolved_manifest_dir/$HOST_NAME.json" ]; then
+                    found=true
+                fi
+            fi
+        fi
+
+        if $found; then
+            if [ -n "$DETECTED_BROWSERS" ]; then
+                DETECTED_BROWSERS="$DETECTED_BROWSERS$newline$name"
+            else
+                DETECTED_BROWSERS="$name"
+            fi
+            log_success "Detected: $name"
+        fi
+
+        i=$((i + 1))
+    done
+
+    if [ -z "$DETECTED_BROWSERS" ] && ! $FLATPAK_ONLY; then
+        log_warn "No native browsers detected"
+    fi
+}
+
+# Detect flatpak browsers.
+# Populates DETECTED_FLATPAK_BROWSERS.
+# @since 1.0.7
+detect_flatpak_browsers() {
+    if ! $HAS_FLATPAK; then
+        return
+    fi
+
+    local fp_count
+    fp_count="$(config_query '.flatpak.browsers | length')"
+
+    local i=0
+    while [ "$i" -lt "$fp_count" ]; do
+        local name app_id
+        name="$(config_query ".flatpak.browsers[$i].name")"
+        app_id="$(config_query ".flatpak.browsers[$i].appId")"
+
+        # Skip if not in filter
+        if ! browser_in_filter "$name"; then
+            i=$((i + 1))
+            continue
+        fi
+
+        # Check if the flatpak app is installed
+        if flatpak list --columns=application 2>/dev/null | grep -q "^${app_id}$"; then
+            if [ -n "$DETECTED_FLATPAK_BROWSERS" ]; then
+                DETECTED_FLATPAK_BROWSERS="$DETECTED_FLATPAK_BROWSERS$newline$app_id"
+            else
+                DETECTED_FLATPAK_BROWSERS="$app_id"
+            fi
+            log_success "Detected flatpak: $name ($app_id)"
+        fi
+
+        i=$((i + 1))
+    done
+
+    if [ -z "$DETECTED_FLATPAK_BROWSERS" ] && $HAS_FLATPAK; then
+        log_info "No flatpak browsers detected"
+    fi
+}
+
+# Detect the password store directory.
+# Sets PASSWORD_STORE_DIR.
+# @since 1.0.7
+detect_password_store() {
+    PASSWORD_STORE_DIR="${PASSWORD_STORE_DIR:-}"
+    if [ -n "${PASSWORD_STORE_DIR:-}" ]; then
+        :
+    elif [ -n "${PASSWORD_STORE_DIR_ENV:-}" ]; then
+        PASSWORD_STORE_DIR="$PASSWORD_STORE_DIR_ENV"
+    elif [ -d "$HOME/.password-store" ]; then
+        PASSWORD_STORE_DIR="$HOME/.password-store"
+    else
+        # Ask the user
+        local default_dir="$HOME/.password-store"
+        PASSWORD_STORE_DIR="$(prompt "Password store directory" "$default_dir")"
+        PASSWORD_STORE_DIR="$(expand_tilde "$PASSWORD_STORE_DIR")"
+    fi
+
+    if [ ! -d "$PASSWORD_STORE_DIR" ]; then
+        log_warn "Password store directory not found: $PASSWORD_STORE_DIR"
+    else
+        log_success "Password store: $PASSWORD_STORE_DIR"
+    fi
+}
+
+# Detect gpg and jq paths, prompting for customisations on macOS.
+# Sets CUSTOM_GPG and CUSTOM_JQ.
+# @since 1.0.7
+detect_tool_paths() {
+    local gpg_path jq_path
+
+    gpg_path="$(command -v gpg 2>/dev/null || echo "")"
+    jq_path="$(command -v jq 2>/dev/null || echo "")"
+
+    # On macOS, gpg/jq may be in /opt/homebrew/bin or /usr/local/bin
+    # but not in the default PATH that the bootstrap host sees
+    if [ "$OS" = "darwin" ]; then
+        # Check if gpg is outside the default PATH
+        if [ -x "/opt/homebrew/bin/gpg" ] && [ "$gpg_path" != "/opt/homebrew/bin/gpg" ]; then
+            gpg_path="/opt/homebrew/bin/gpg"
+        elif [ -x "/usr/local/bin/gpg" ] && [ "$gpg_path" != "/usr/local/bin/gpg" ]; then
+            gpg_path="/usr/local/bin/gpg"
+        fi
+        if [ -x "/opt/homebrew/bin/jq" ] && [ "$jq_path" != "/opt/homebrew/bin/jq" ]; then
+            jq_path="/opt/homebrew/bin/jq"
+        elif [ -x "/usr/local/bin/jq" ] && [ "$jq_path" != "/usr/local/bin/jq" ]; then
+            jq_path="/usr/local/bin/jq"
+        fi
+    fi
+
+    # Determine if custom paths are needed (not in default PATH)
+    local default_path_gpg default_path_jq
+    default_path_gpg="/usr/bin/gpg"
+    default_path_jq="/usr/bin/jq"
+
+    if [ "$gpg_path" != "$default_path_gpg" ] && [ -n "$gpg_path" ]; then
+        CUSTOM_GPG="$gpg_path"
+    fi
+    if [ "$jq_path" != "$default_path_jq" ] && [ -n "$jq_path" ]; then
+        CUSTOM_JQ="$jq_path"
+    fi
+
+    # Interactive prompt for custom paths
+    if ! $YES; then
+        local response
+        response="$(prompt "GPG binary path" "${gpg_path:-gpg}")"
+        if [ "$response" != "gpg" ] && [ "$response" != "${gpg_path:-}" ]; then
+            CUSTOM_GPG="$response"
+        elif [ -n "$CUSTOM_GPG" ] && [ "$response" = "${gpg_path:-}" ]; then
+            : # keep the detected custom path
+        fi
+        response="$(prompt "jq binary path" "${jq_path:-jq}")"
+        if [ "$response" != "jq" ] && [ "$response" != "${jq_path:-}" ]; then
+            CUSTOM_JQ="$response"
+        elif [ -n "$CUSTOM_JQ" ] && [ "$response" = "${jq_path:-}" ]; then
+            : # keep the detected custom path
+        fi
+    fi
+}
+
+# Run browser and tool detection.
+# Platform, dependencies, prefix, and password store are already detected
+# by main(), so this only runs the browser/tool-specific detection.
+# @since 1.0.7
+run_detect() {
+    PHASE="detect"
+    log_section "Detection"
+
+    detect_browsers
+    detect_flatpak_browsers
+    detect_tool_paths
+    offer_host_hash
+}
+
+# Ask the user whether to pin HOST_HASH in their parcelrc.
+# If HOST_HASH is already set, no prompt is offered. In --yes mode, the
+# hash is not applied — pinning is an opt-in security decision.
+# @since 1.0.7
+offer_host_hash() {
+    if [ -z "$SIGNED_HOST_SHA256" ]; then
+        return
+    fi
+
+    # Check if HOST_HASH is already set in the parcelrc
+    local user_home parcelrc
+    user_home="$(get_user_home)"
+    parcelrc="$user_home/.config/parcel/parcelrc"
+    if [ -f "$parcelrc" ] && grep -q '^HOST_HASH=' "$parcelrc" 2>/dev/null; then
+        log_info "HOST_HASH already set in parcelrc — leaving as-is"
+        return
+    fi
+
+    if $YES; then
+        return
+    fi
+
+    printf '\n' >&2
+    log_info "The signed host script has SHA256: $SIGNED_HOST_SHA256"
+    log_info "Pinning this hash in parcelrc means future host updates must be"
+    log_info "reviewed and approved by you before they execute."
+    if prompt_yesno "Pin HOST_HASH in parcelrc?" true; then
+        WANTS_HOST_HASH=true
+    fi
+}
+
+# ===========================================================================
+# Phase 2: PREVIEW
+# ===========================================================================
+
+# Print a summary of all proposed changes for user confirmation.
+# @returns {boolean} 0 if user confirms, 1 if declined.
+# @since 1.0.7
+preview_install() {
+    PHASE="preview"
+    log_section "Preview"
+
+    log_info "The following changes will be made:"
+    printf '\n' >&2
+
+    # Bootstrap host
+    if [ "$ACTION" = "install" ]; then
+        log_info "  Install / overwrite bootstrap host:"
+        log_info "    $HOST_BIN_PATH"
+        printf '\n' >&2
+
+        # Native manifests
+        if [ -n "$DETECTED_BROWSERS" ]; then
+            log_info "  Generate & install native messaging manifests:"
+            local name
+            for name in $DETECTED_BROWSERS; do
+                local browser_json manifest_dir
+                browser_json="$(get_browser_config "$name")"
+                local key
+                key="$(manifest_key)"
+                manifest_dir="$(printf '%s' "$browser_json" | jq -r ".manifestDir[\"$key\"]?")"
+                manifest_dir="$(expand_tilde "$manifest_dir")"
+                local manifest_path="$manifest_dir/$HOST_NAME.json"
+                log_info "    $name: $manifest_path"
+            done
+            printf '\n' >&2
+        fi
+
+        # Flatpak
+        if [ -n "$DETECTED_FLATPAK_BROWSERS" ]; then
+            log_info "  Install flatpak wrappers:"
+            local app_id
+            for app_id in $DETECTED_FLATPAK_BROWSERS; do
+                local wrapper_dir
+                wrapper_dir="$(expand_tilde "$HOME/.var/app/$app_id/config/parcel")"
+                log_info "    $app_id: $wrapper_dir/parcel-flatpak-wrapper.sh"
+            done
+            log_info "  Apply flatpak overrides:"
+            for app_id in $DETECTED_FLATPAK_BROWSERS; do
+                log_info "    flatpak override --user --talk-name=org.freedesktop.Flatpak $app_id"
+            done
+            printf '\n' >&2
+        fi
+
+        # parcrelrc customisations
+        local rc_changes=""
+        [ -n "$CUSTOM_GPG" ] && rc_changes="$rc_changes GPG=$CUSTOM_GPG"
+        [ -n "$CUSTOM_JQ" ] && rc_changes="$rc_changes JQ=$CUSTOM_JQ"
+        $WANTS_HOST_HASH && rc_changes="$rc_changes HOST_HASH=$SIGNED_HOST_SHA256"
+        if [ -n "$rc_changes" ]; then
+            log_info "  Apply parcelrc customisations (stricter-only):"
+            for change in $rc_changes; do
+                log_info "    $change"
+            done
+            printf '\n' >&2
+        fi
+
+        local user_home parcelrc
+        user_home="$(get_user_home)"
+        parcelrc="$user_home/.config/parcel/parcelrc"
+        if [ -f "$parcelrc" ]; then
+            log_info "  Smoke test will verify the existing parcelrc"
+        else
+            log_info "  Smoke test will create ~/.config/parcel/parcelrc"
+        fi
+        printf '\n' >&2
+    fi
+
+    if ! $YES; then
+        if prompt_yesno "Proceed with these changes?" true; then
+            return 0
+        else
+            log_info "Aborted by user."
+            exit 2
+        fi
+    fi
+    return 0
+}
+
+# Print preview of uninstall actions.
+# @returns {boolean} 0 if user confirms.
+# @since 1.0.7
+preview_uninstall() {
+    PHASE="preview"
+    log_section "Preview (Uninstall)"
+
+    log_info "The following will be removed:"
+    printf '\n' >&2
+
+    # Bootstrap host
+    if [ -f "$HOST_BIN_PATH" ]; then
+        log_info "  $HOST_BIN_PATH"
+    fi
+
+    # Native manifests
+    local browser_count
+    browser_count="$(config_query '.browsers | length')"
+    local i=0
+    while [ "$i" -lt "$browser_count" ]; do
+        local name manifest_dir key
+        name="$(config_query ".browsers[$i].name")"
+        for level in system user; do
+            local os_key="$OS"
+            [ "$os_key" = "bsd" ] && os_key="linux"
+            key="$os_key-$level"
+            manifest_dir="$(config_query ".browsers[$i].manifestDir[\"$key\"]?")"
+            if [ -n "$manifest_dir" ]; then
+                manifest_dir="$(expand_tilde "$manifest_dir")"
+                local manifest_path="$manifest_dir/$HOST_NAME.json"
+                if [ -f "$manifest_path" ]; then
+                    log_info "  $manifest_path"
+                fi
+            fi
+        done
+        i=$((i + 1))
+    done
+
+    # Flatpak wrappers and overrides
+    if $HAS_FLATPAK; then
+        local fp_count
+        fp_count="$(config_query '.flatpak.browsers | length')"
+        i=0
+        while [ "$i" -lt "$fp_count" ]; do
+            local app_id wrapper_dir
+            app_id="$(config_query ".flatpak.browsers[$i].appId")"
+            wrapper_dir="$(expand_tilde "$HOME/.var/app/$app_id/config/parcel")"
+            if [ -f "$wrapper_dir/parcel-flatpak-wrapper.sh" ]; then
+                log_info "  $wrapper_dir/parcel-flatpak-wrapper.sh"
+            fi
+            # Flatpak override: we can't easily check, just note it
+            i=$((i + 1))
+        done
+    fi
+
+    # Config files
+    if $REMOVE_CONFIG; then
+        local parcelrc="$HOME/.config/parcel"
+        local parcelfile="$PASSWORD_STORE_DIR/.parcel.json"
+        log_info "  $parcelrc (directory)"
+        if [ -f "$parcelfile" ]; then
+            log_info "  $parcelfile"
+        fi
+    fi
+
+    printf '\n' >&2
+    log_info "Note: parcelrc and .parcel.json are preserved (use --remove-config to also remove them)"
+    printf '\n' >&2
+
+    if ! $YES; then
+        if prompt_yesno "Proceed with uninstall?" true; then
+            return 0
+        else
+            log_info "Aborted by user."
+            exit 2
+        fi
+    fi
+    return 0
+}
+
+# ===========================================================================
+# Phase 3: APPLY
+# ===========================================================================
+
+# Install the bootstrap host to the target path.
+# @since 1.0.7
+install_bootstrap_host() {
+    log_info "Installing bootstrap host..."
+
+    # Write the bootstrap host to a temp file first
+    local tmp_host
+    tmp_host="$(make_temp)"
+    printf '%s' "$BOOTSTRAP_HOST" > "$tmp_host"
+
+    # Install
+    if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
+        install -m 0755 -o "$SERVICES_USER" -g staff "$tmp_host" "$HOST_BIN_PATH" 2>/dev/null || \
+        install -m 0755 -o "$SERVICES_USER" "$tmp_host" "$HOST_BIN_PATH"
+    else
+        mkdir -p "$HOST_BIN_DIR"
+        install -m 0755 "$tmp_host" "$HOST_BIN_PATH"
+    fi
+
+    if [ ! -f "$HOST_BIN_PATH" ]; then
+        die "Failed to install bootstrap host to $HOST_BIN_PATH"
+    fi
+
+    log_success "Bootstrap host installed to $HOST_BIN_PATH"
+    APPLIED_CHANGES="$APPLIED_CHANGES bootstrap-host"
+}
+
+# Generate a native messaging manifest using jq.
+# @param {string} engine - chromium or firefox.
+# @param {string} host_path - Path to the host binary.
+# @param {string} host_name - Host name (e.g. com.github.erayd.parcel).
+# @param {string} ext_id - Extension ID.
+# @param {boolean} is_flatpak - Whether this is a flatpak manifest.
+# @returns {string} JSON manifest on stdout.
+# @since 1.0.7
+generate_manifest() {
+    local engine="$1" host_path="$2" host_name="$3" ext_id="$4" is_flatpak="$5"
+    local description="Native host component for the Parcel extension"
+    if [ "$is_flatpak" = "true" ]; then
+        description="Native host component for the Parcel extension (Flatpak wrapper)"
+    fi
+
+    if [ "$engine" = "chromium" ]; then
+        jq -n \
+            --arg name "$host_name" \
+            --arg desc "$description" \
+            --arg path "$host_path" \
+            --arg origin "chrome-extension://${ext_id}/" \
+            '{name: $name, description: $desc, path: $path, type: "stdio", allowed_origins: [$origin]}'
+    else
+        jq -n \
+            --arg name "$host_name" \
+            --arg desc "$description" \
+            --arg path "$host_path" \
+            --arg ext "$ext_id" \
+            '{name: $name, description: $desc, path: $path, type: "stdio", allowed_extensions: [$ext]}'
+    fi
+}
+
+# Generate and install native messaging manifests for detected browsers.
+# @since 1.0.7
+install_native_manifests() {
+    if [ -z "$DETECTED_BROWSERS" ]; then
+        return
+    fi
+
+    log_info "Installing native messaging manifests..."
+
+    local name
+    for name in $DETECTED_BROWSERS; do
+        local browser_json engine key manifest_dir manifest_path
+        browser_json="$(get_browser_config "$name")"
+        engine="$(browser_field "$browser_json" '.engine')"
+        key="$(manifest_key)"
+        manifest_dir="$(browser_field "$browser_json" ".manifestDir[\"$key\"]?")"
+
+        if [ -z "$manifest_dir" ]; then
+            log_warn "No manifest directory for $name on $OS — skipping"
+            INSTALL_ERRORS=$((INSTALL_ERRORS + 1))
+            continue
+        fi
+
+        manifest_dir="$(expand_tilde "$manifest_dir")"
+        manifest_path="$manifest_dir/$HOST_NAME.json"
+
+        # Create the manifest directory
+        if [ ! -d "$manifest_dir" ]; then
+            if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
+                mkdir -p "$manifest_dir"
+                chown "$SERVICES_USER" "$manifest_dir" 2>/dev/null || true
+            else
+                mkdir -p "$manifest_dir" || {
+                    log_error "Cannot create manifest directory: $manifest_dir"
+                    INSTALL_ERRORS=$((INSTALL_ERRORS + 1))
+                    continue
+                }
+            fi
+        fi
+
+        # Determine the extension ID based on engine
+        local ext_id
+        if [ "$engine" = "chromium" ]; then
+            ext_id="$EXT_ID_CHROMIUM"
+        else
+            ext_id="$EXT_ID_FIREFOX"
+        fi
+
+        # Generate and write the manifest
+        generate_manifest "$engine" "$HOST_BIN_PATH" "$HOST_NAME" "$ext_id" false > "$manifest_path"
+
+        if [ $? -eq 0 ] && [ -f "$manifest_path" ]; then
+            log_success "Manifest installed: $name"
+            APPLIED_CHANGES="$APPLIED_CHANGES manifest-$name"
+
+            # Fix ownership if running as root
+            if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
+                chown "$SERVICES_USER" "$manifest_path" 2>/dev/null || true
+            fi
+        else
+            log_error "Failed to install manifest for $name"
+            INSTALL_ERRORS=$((INSTALL_ERRORS + 1))
+        fi
+    done
+}
+
+# Generate the flatpak wrapper script content.
+# @param {string} host_path - Path to the installed bootstrap host.
+# @returns {string} Wrapper script content on stdout.
+# @since 1.0.7
+generate_flatpak_wrapper() {
+    local host_path="$1"
+    cat <<FLATPAK_WRAPPER
+#!/usr/bin/env bash
+# Auto-generated by parcel-setup.sh
+# Wrapper that launches the Parcel native host on the host system via flatpak-spawn.
+exec flatpak-spawn --host "$host_path"
+FLATPAK_WRAPPER
+}
+
+# Install flatpak wrappers and apply overrides for detected flatpak browsers.
+# @since 1.0.7
+install_flatpak_wrappers() {
+    if [ -z "$DETECTED_FLATPAK_BROWSERS" ]; then
+        return
+    fi
+
+    log_info "Installing flatpak wrappers..."
+
+    local app_id
+    for app_id in $DETECTED_FLATPAK_BROWSERS; do
+        local wrapper_dir wrapper_path manifest_dir
+        wrapper_dir="$(expand_tilde "$HOME/.var/app/$app_id/config/parcel")"
+        wrapper_path="$wrapper_dir/parcel-flatpak-wrapper.sh"
+
+        # Create wrapper directory
+        mkdir -p "$wrapper_dir" || {
+            log_error "Cannot create flatpak wrapper directory: $wrapper_dir"
+            INSTALL_ERRORS=$((INSTALL_ERRORS + 1))
+            continue
+        }
+
+        # Generate and install wrapper
+        generate_flatpak_wrapper "$HOST_BIN_PATH" > "$wrapper_path"
+        chmod 0755 "$wrapper_path"
+
+        # Find the browser's name to get its engine and manifest dir
+        local fp_count browser_name engine ext_id
+        fp_count="$(config_query '.flatpak.browsers | length')"
+        browser_name=""
+        engine="chromium"
+        local i=0
+        while [ "$i" -lt "$fp_count" ]; do
+            local candidate_id
+            candidate_id="$(config_query ".flatpak.browsers[$i].appId")"
+            if [ "$candidate_id" = "$app_id" ]; then
+                browser_name="$(config_query ".flatpak.browsers[$i].name")"
+                break
+            fi
+            i=$((i + 1))
+        done
+
+        if [ -n "$browser_name" ]; then
+            local browser_json
+            browser_json="$(get_browser_config "$browser_name")"
+            engine="$(browser_field "$browser_json" '.engine')"
+        fi
+
+        # Determine extension ID
+        if [ "$engine" = "chromium" ]; then
+            ext_id="$EXT_ID_CHROMIUM"
+        else
+            ext_id="$EXT_ID_FIREFOX"
+        fi
+
+        # Install manifest pointing to the wrapper
+        # For flatpak, the user-level manifest dir is what matters
+        local os_key="$OS"
+        [ "$os_key" = "bsd" ] && os_key="linux"
+        manifest_dir="$(get_browser_config "$browser_name" | jq -r ".manifestDir[\"${os_key}-user\"]?")"
+        manifest_dir="$(expand_tilde "$manifest_dir")"
+        local manifest_path="$manifest_dir/$HOST_NAME.json"
+
+        if [ -n "$manifest_dir" ]; then
+            mkdir -p "$manifest_dir" 2>/dev/null || true
+            generate_manifest "$engine" "$wrapper_path" "$HOST_NAME" "$ext_id" true > "$manifest_path"
+        fi
+
+        # Apply flatpak override
+        flatpak override --user --talk-name=org.freedesktop.Flatpak "$app_id" 2>/dev/null || \
+            log_warn "Failed to apply flatpak override for $app_id"
+
+        log_success "Flatpak wrapper installed: $app_id"
+        APPLIED_CHANGES="$APPLIED_CHANGES flatpak-$app_id"
+    done
+}
+
+# ===========================================================================
+# Smoke test
+# ===========================================================================
+
+# Get the home directory of the invoking user (respects sudo).
+# @returns {string} Home directory path.
+# @since 1.0.7
+get_user_home() {
+    if [ -n "$SERVICES_USER" ]; then
+        if [ "$OS" = "darwin" ]; then
+            eval echo "~$SERVICES_USER" 2>/dev/null || echo "$HOME"
+        else
+            getent passwd "$SERVICES_USER" 2>/dev/null | cut -d: -f6 || echo "$HOME"
+        fi
+    else
+        echo "$HOME"
+    fi
+}
+
+# Run the bootstrap host as the correct user.
+# Stdout is discarded — the native messaging protocol output is not needed
+# during the smoke test, and leaking it to the terminal is confusing.
+# @param {string} host_bin - Path to the bootstrap host binary.
+# @returns {number} Exit code of the host.
+# @since 1.0.7
+run_host_as_user() {
+    local host_bin="$1"
+    local user_home
+    user_home="$(get_user_home)"
+
+    if [ -n "$SERVICES_USER" ]; then
+        printf '' | sudo -u "$SERVICES_USER" env "HOME=$user_home" "$host_bin" >/dev/null 2>/dev/null
+        return $?
+    else
+        printf '' | "$host_bin" >/dev/null 2>/dev/null
+        return $?
+    fi
+}
+
+# Run the first smoke test (cold start).
+# Creates the default parcelrc if it doesn't exist.
+# @since 1.0.7
+first_smoke_test() {
+    log_info "Running first smoke test (cold start)..."
+    PHASE="apply-smoke1"
+
+    run_host_as_user "$HOST_BIN_PATH"
+    local rc=$?
+
+    local user_home parcelrc
+    user_home="$(get_user_home)"
+    parcelrc="$user_home/.config/parcel/parcelrc"
+
+    if [ $rc -ne 0 ] && [ ! -f "$parcelrc" ]; then
+        log_error "First smoke test failed and parcelrc was not created"
+        log_error "This usually means jq or gpg are not in the default PATH"
+        die "Smoke test failed (exit code $rc)"
+    fi
+
+    if [ ! -f "$parcelrc" ]; then
+        log_error "First smoke test completed but parcelrc was not created"
+        die "Smoke test failed (parcelrc not found at $parcelrc)"
+    fi
+
+    if [ $rc -ne 0 ]; then
+        log_warn "First smoke test exited with code $rc (likely gpg not in default PATH)"
+        log_info "  Custom tool paths will be applied before the second smoke test"
+    else
+        log_success "First smoke test passed (parcelrc created/verified)"
+    fi
+}
+
+# Run the second smoke test (verification).
+# @since 1.0.7
+second_smoke_test() {
+    log_info "Running second smoke test (verification)..."
+    PHASE="apply-smoke2"
+
+    local parcelrc_changes_before
+    parcelrc_changes_before="$APPLIED_PARCELRC_CHANGES"
+
+    run_host_as_user "$HOST_BIN_PATH"
+    local rc=$?
+
+    if [ $rc -ne 0 ]; then
+        log_error "Second smoke test failed (exit code $rc)"
+        log_error "Reverting parcelrc customisations applied in this step"
+
+        # Revert: remove any lines we added. Since we track what we changed,
+        # we can remove those specific lines. For now, report the issue.
+        # A full revert would require backup/restore of the parcelrc.
+        local user_home
+        user_home="$(get_user_home)"
+        local parcelrc="$user_home/.config/parcel/parcelrc"
+        log_error "Check the parcel-host log for details:"
+        log_error "  $user_home/.local/log/parcel-host.log"
+        die "Smoke test verification failed"
+    fi
+
+    log_success "Second smoke test passed"
+}
+
+# ===========================================================================
+# parcelrc customisation
+# ===========================================================================
+
+# Set a variable in parcelrc if not already set.
+# Inserts the value below the commented-out default line for the same variable.
+# Does nothing if the variable is already set to a non-default value.
+# @param {string} parcelrc_path - Path to the parcelrc file.
+# @param {string} varname - Variable name (e.g. GPG, JQ, HOST_HASH).
+# @param {string} value - Value to set.
+# @returns {boolean} 0 if value was applied, 1 if already set.
+# @since 1.0.7
+set_parcelrc_var() {
+    local parcelrc_path="$1" varname="$2" value="$3"
+
+    # Check if the variable is already set (uncommented)
+    if grep -q "^${varname}=" "$parcelrc_path" 2>/dev/null; then
+        return 1  # Already set, leave it alone
+    fi
+
+    # Insert below the commented-out default line, or append to end
+    local tmpfile
+    tmpfile="$(make_temp)"
+    awk -v var="$varname" -v val="$value" '
+        {
+            print
+            if (!found && $0 ~ "^#[[:space:]]*" var "=") {
+                print var "=\"" val "\""
+                found = 1
+            }
+        }
+        END {
+            if (!found) {
+                print var "=\"" val "\""
+            }
+        }
+    ' "$parcelrc_path" > "$tmpfile"
+
+    # Preserve permissions (0600)
+    cp "$tmpfile" "$parcelrc_path"
+    chmod 0600 "$parcelrc_path"
+
+    return 0
+}
+
+# The list of parcelrc changes applied (for revert tracking).
+APPLIED_PARCELRC_CHANGES=""
+
+# Apply parcelrc customisations (stricter-only, user-chosen paths).
+# HOST_HASH is only applied if the user opted in via offer_host_hash().
+# If a variable is already set in parcelrc, it is never overwritten.
+# @since 1.0.7
+apply_parcelrc_customisations() {
+    local user_home parcelrc
+    user_home="$(get_user_home)"
+    parcelrc="$user_home/.config/parcel/parcelrc"
+
+    if [ ! -f "$parcelrc" ]; then
+        log_warn "parcelrc not found at $parcelrc — skipping customisations"
+        return
+    fi
+
+    log_info "Applying parcelrc customisations..."
+
+    # Fix ownership if running as root
+    if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
+        chown "$SERVICES_USER" "$parcelrc" 2>/dev/null || true
+    fi
+
+    # GPG path
+    if [ -n "$CUSTOM_GPG" ]; then
+        if set_parcelrc_var "$parcelrc" "GPG" "$CUSTOM_GPG"; then
+            log_success "Set GPG=$CUSTOM_GPG in parcelrc"
+            APPLIED_PARCELRC_CHANGES="$APPLIED_PARCELRC_CHANGES GPG"
+        else
+            log_info "GPG already set in parcelrc — leaving as-is"
+        fi
+    fi
+
+    # JQ path
+    if [ -n "$CUSTOM_JQ" ]; then
+        if set_parcelrc_var "$parcelrc" "JQ" "$CUSTOM_JQ"; then
+            log_success "Set JQ=$CUSTOM_JQ in parcelrc"
+            APPLIED_PARCELRC_CHANGES="$APPLIED_PARCELRC_CHANGES JQ"
+        else
+            log_info "JQ already set in parcelrc — leaving as-is"
+        fi
+    fi
+
+    # HOST_HASH (opt-in, applied after second smoke test)
+    if $WANTS_HOST_HASH && [ -n "$SIGNED_HOST_SHA256" ]; then
+        if set_parcelrc_var "$parcelrc" "HOST_HASH" "$SIGNED_HOST_SHA256"; then
+            log_success "Set HOST_HASH in parcelrc (pins signed host for review)"
+            APPLIED_PARCELRC_CHANGES="$APPLIED_PARCELRC_CHANGES HOST_HASH"
+        else
+            log_info "HOST_HASH already set in parcelrc — leaving as-is"
+        fi
+    fi
+
+    # PASSWORD_STORE_DIR if non-default
+    if [ -n "$CUSTOM_PASSWORD_STORE_DIR" ] && [ "$CUSTOM_PASSWORD_STORE_DIR" != "$HOME/.password-store" ]; then
+        if set_parcelrc_var "$parcelrc" "PASSWORD_STORE_DIR" "$CUSTOM_PASSWORD_STORE_DIR"; then
+            log_success "Set PASSWORD_STORE_DIR in parcelrc"
+            APPLIED_PARCELRC_CHANGES="$APPLIED_PARCELRC_CHANGES PASSWORD_STORE_DIR"
+        else
+            log_info "PASSWORD_STORE_DIR already set in parcelrc — leaving as-is"
+        fi
+    fi
+}
+
+# ===========================================================================
+# Summary report
+# ===========================================================================
+
+# Print a summary of what was done.
+# @since 1.0.7
+summary_report() {
+    log_section "Summary"
+
+    local user_home
+    user_home="$(get_user_home)"
+
+    for change in $APPLIED_CHANGES; do
+        case "$change" in
+            bootstrap-host) log_success "Bootstrap host installed: $HOST_BIN_PATH" ;;
+            manifest-*) log_success "Manifest installed: ${change#manifest-}" ;;
+            flatpak-*) log_success "Flatpak wrapper installed: ${change#flatpak-}" ;;
+        esac
+    done
+
+    for change in $APPLIED_PARCELRC_CHANGES; do
+        log_success "parcelrc customised: $change"
+    done
+
+    if [ "$INSTALL_ERRORS" -gt 0 ]; then
+        log_warn "$INSTALL_ERRORS browser setup(s) failed"
+    fi
+
+    printf '\n' >&2
+    log_info "parcelrc: $user_home/.config/parcel/parcelrc"
+    log_info "Log file: $user_home/.local/log/parcel-host.log"
+    printf '\n' >&2
+
+    # Offer config builder
+    if [ "$ACTION" = "install" ] && ! $YES; then
+        if [ -d "$PASSWORD_STORE_DIR" ]; then
+            local parcelfile="$PASSWORD_STORE_DIR/.parcel.json"
+            local config_question="Would you like to create a .parcel.json config now?"
+            if [ -f "$parcelfile" ]; then
+                config_question="Would you like to modify your existing .parcel.json config?"
+            fi
+            if prompt_yesno "$config_question" true; then
+                run_config_builder
+            fi
+        else
+            log_info "Password store not found — skipping config builder offer"
+        fi
+    fi
+
+    # Exit code
+    if [ "$INSTALL_ERRORS" -gt 0 ]; then
+        exit 4
+    fi
+    exit 0
+}
+
+# ===========================================================================
+# Apply phase (install)
+# ===========================================================================
+
+# Run the full apply phase for installation.
+# @since 1.0.7
+apply_install() {
+    PHASE="apply"
+    log_section "Applying"
+
+    install_bootstrap_host
+    install_native_manifests
+    install_flatpak_wrappers
+
+    # First smoke test (creates parcelrc)
+    first_smoke_test
+
+    # Apply user-chosen paths (gpg/jq) — before second smoke test
+    apply_parcelrc_customisations
+
+    # Second smoke test (verification)
+    second_smoke_test
+
+    # Apply remaining customisations (HOST_HASH if opted in) — after verification
+    apply_parcelrc_customisations
+
+    summary_report
+}
+
+# ===========================================================================
+# Uninstall
+# ===========================================================================
+
+# Run the uninstall phase.
+# Removes host binary, manifests, flatpak wrappers, and optionally config.
+# @since 1.0.7
+do_uninstall() {
+    PHASE="uninstall-detect"
+    log_section "Uninstall"
+
+    # Detect what exists
+    local removed=""
+
+    # Remove bootstrap host
+    if [ -f "$HOST_BIN_PATH" ]; then
+        rm -f "$HOST_BIN_PATH"
+        log_success "Removed: $HOST_BIN_PATH"
+        removed="$removed host-binary"
+    fi
+
+    # Remove native messaging manifests
+    local browser_count
+    browser_count="$(config_query '.browsers | length')"
+    local i=0
+    while [ "$i" -lt "$browser_count" ]; do
+        local name
+        name="$(config_query ".browsers[$i].name")"
+        for level in system user; do
+            local os_key="$OS"
+            [ "$os_key" = "bsd" ] && os_key="linux"
+            local key="$os_key-$level"
+            local manifest_dir
+            manifest_dir="$(config_query ".browsers[$i].manifestDir[\"$key\"]?")"
+            if [ -n "$manifest_dir" ]; then
+                manifest_dir="$(expand_tilde "$manifest_dir")"
+                local manifest_path="$manifest_dir/$HOST_NAME.json"
+                if [ -f "$manifest_path" ]; then
+                    rm -f "$manifest_path"
+                    log_success "Removed: $manifest_path"
+                    removed="$removed manifest-$name-$level"
+                fi
+            fi
+        done
+        i=$((i + 1))
+    done
+
+    # Remove flatpak wrappers and overrides
+    if $HAS_FLATPAK; then
+        local fp_count
+        fp_count="$(config_query '.flatpak.browsers | length')"
+        i=0
+        while [ "$i" -lt "$fp_count" ]; do
+            local app_id wrapper_dir
+            app_id="$(config_query ".flatpak.browsers[$i].appId")"
+            wrapper_dir="$(expand_tilde "$HOME/.var/app/$app_id/config/parcel")"
+            if [ -f "$wrapper_dir/parcel-flatpak-wrapper.sh" ]; then
+                rm -f "$wrapper_dir/parcel-flatpak-wrapper.sh"
+                rmdir "$wrapper_dir" 2>/dev/null || true
+                log_success "Removed flatpak wrapper: $app_id"
+                removed="$removed flatpak-$app_id"
+            fi
+            i=$((i + 1))
+        done
+    fi
+
+    # Remove config if requested
+    if $REMOVE_CONFIG; then
+        local parcelrc_dir="$HOME/.config/parcel"
+        local parcelfile="$PASSWORD_STORE_DIR/.parcel.json"
+        if [ -d "$parcelrc_dir" ]; then
+            rm -rf "$parcelrc_dir"
+            log_success "Removed: $parcelrc_dir"
+            removed="$removed parcelrc-dir"
+        fi
+        if [ -f "$parcelfile" ]; then
+            rm -f "$parcelfile"
+            log_success "Removed: $parcelfile"
+            removed="$removed parcelfile"
+        fi
+    fi
+
+    # Note about log file
+    log_info "Note: log file (~/.local/log/parcel-host.log) is preserved"
+
+    if [ -z "$removed" ]; then
+        log_info "Nothing to remove — Parcel does not appear to be installed"
+    fi
+
+    exit 0
+}
+
+# ===========================================================================
+# Interactive .parcel.json config builder
+# ===========================================================================
+
+# Run the interactive config builder for .parcel.json.
+# Scans the password store, suggests rules, and lets the user edit.
+# @since 1.0.7
+run_config_builder() {
+    PHASE="config"
+    log_section "Config Builder (.parcel.json)"
+
+    local parcelfile="$PASSWORD_STORE_DIR/.parcel.json"
+
+    # Check password store
+    if [ ! -d "$PASSWORD_STORE_DIR" ]; then
+        die "Password store not found: $PASSWORD_STORE_DIR"
+    fi
+
+    # Start with existing config or default
+    local config_json
+    if [ -f "$parcelfile" ]; then
+        config_json="$(cat "$parcelfile")"
+        log_info "Loaded existing .parcel.json"
+    else
+        config_json="{}"
+        log_info "Creating new .parcel.json"
+    fi
+
+    # Scan the password store
+    log_info "Scanning password store..."
+    local tree_output
+    tree_output="$(find "$PASSWORD_STORE_DIR" -type d -not -path '*/.git/*' -not -name '.git' 2>/dev/null | sort)"
+    local gpg_files
+    gpg_files="$(find "$PASSWORD_STORE_DIR" -name '*.gpg' -not -path '*/.git/*' 2>/dev/null | sort)"
+
+    # Show directory structure
+    printf '\n' >&2
+    if $DEBUG; then
+        log_info "Directory structure:"
+        local dir
+        while IFS= read -r dir; do
+            local rel_dir="${dir#$PASSWORD_STORE_DIR}"
+            [ -z "$rel_dir" ] && rel_dir="/"
+            local count
+            count="$(find "$dir" -maxdepth 1 -name '*.gpg' 2>/dev/null | wc -l | tr -d ' ')"
+            if [ "$count" -gt 0 ]; then
+                log_info "  $rel_dir ($count entries)"
+            fi
+        done <<< "$tree_output"
+        printf '\n' >&2
+    fi
+
+    # Auto-detect rules based on common patterns
+    local rules_json="[]"
+    local detected_dirs
+    detected_dirs="$(find "$PASSWORD_STORE_DIR" -type d -not -path '*/.git/*' -not -name '.git' 2>/dev/null | sort)"
+
+    # Detect top-level credential-type subdirs
+    # Skip the password-store root itself and any dotfile/dotdir
+    local top_level
+    top_level="$(find "$PASSWORD_STORE_DIR" -maxdepth 1 -mindepth 1 -type d -not -path '*/.git/*' -not -name '.git' -not -name '.*' 2>/dev/null | sort)"
+    while IFS= read -r dir; do
+        [ -z "$dir" ] && continue
+        local basename_dir rel_pattern
+        basename_dir="${dir##*/}"
+        # Skip dotfile dirs (basename starts with .)
+        case "$basename_dir" in .*) continue ;; esac
+        rel_pattern="$(printf '%s' "$dir" | sed "s|$PASSWORD_STORE_DIR/||")"
+
+        # Detect credential type from directory name
+        local entry_class="login"
+        case "$basename_dir" in
+            passkey|passkeys|webauthn) entry_class="passkey" ;;
+            card|cards) entry_class="card" ;;
+            login|logins|credentials) entry_class="login" ;;
+        esac
+
+        # Create a rule for this directory
+        rules_json="$(printf '%s' "$rules_json" | jq \
+            --arg pattern "^${rel_pattern}/" \
+            --arg class "$entry_class" \
+            --arg tag "$basename_dir" \
+            '. += [{pattern: $pattern, class: $class, tag: $tag, color: "333333"}]')"
+    done <<< "$top_level"
+
+    # Also check for nested login/passkey/card dirs
+    while IFS= read -r dir; do
+        [ -z "$dir" ] && continue
+        local basename_dir rel_pattern
+        basename_dir="${dir##*/}"
+        # Skip dotfile dirs (basename starts with .)
+        case "$basename_dir" in .*) continue ;; esac
+        rel_pattern="$(printf '%s' "$dir" | sed "s|$PASSWORD_STORE_DIR/||")"
+
+        case "$basename_dir" in
+            login|logins)
+                rules_json="$(printf '%s' "$rules_json" | jq \
+                    --arg pattern "^${rel_pattern}/" \
+                    --arg tag "$(printf '%s' "$rel_pattern" | cut -d/ -f1)" \
+                    '. += [{pattern: $pattern, class: "login", tag: $tag, color: "333333"}]')"
+                ;;
+            passkey|passkeys)
+                rules_json="$(printf '%s' "$rules_json" | jq \
+                    --arg pattern "^${rel_pattern}/" \
+                    --arg tag "$(printf '%s' "$rel_pattern" | cut -d/ -f1)" \
+                    '. += [{pattern: $pattern, class: "passkey", tag: $tag, color: "333333"}]')"
+                ;;
+            card|cards)
+                rules_json="$(printf '%s' "$rules_json" | jq \
+                    --arg pattern "^${rel_pattern}/" \
+                    --arg tag "$(printf '%s' "$rel_pattern" | cut -d/ -f1)" \
+                    '. += [{pattern: $pattern, class: "card", tag: $tag, color: "333333"}]')"
+                ;;
+        esac
+    done <<< "$(find "$PASSWORD_STORE_DIR" -mindepth 2 -type d -not -path '*/.git/*' \( -name '.*' -prune -o -print \) 2>/dev/null | sort)"
+
+    # Sort rules by specificity: longer (more-specific) patterns first,
+    # so that e.g. ^clients/help/cards/ matches before ^clients/
+    rules_json="$(printf '%s' "$rules_json" | jq 'sort_by(.pattern | length) | reverse | sort_by(.pattern) | reverse')"
+
+    # Present suggested rules
+    printf '\n' >&2
+    log_info "Suggested rules:"
+    local rule_count
+    rule_count="$(printf '%s' "$rules_json" | jq 'length')"
+    if [ "$rule_count" -eq 0 ]; then
+        log_info "  No rules detected. You can add rules manually."
+    else
+        local ri=0
+        while [ "$ri" -lt "$rule_count" ]; do
+            local pattern class tag
+            pattern="$(printf '%s' "$rules_json" | jq -r ".[$ri].pattern")"
+            class="$(printf '%s' "$rules_json" | jq -r ".[$ri].class")"
+            tag="$(printf '%s' "$rules_json" | jq -r ".[$ri].tag")"
+            log_info "  [$((ri+1))] pattern: $pattern | class: $class | tag: $tag"
+            ri=$((ri + 1))
+        done
+    fi
+    printf '\n' >&2
+
+    # Allow rule editing
+    if ! $YES && [ "$rule_count" -gt 0 ]; then
+        local has_existing_rules
+        has_existing_rules="$(printf '%s' "$config_json" | jq '.rules | length > 0')"
+        local rules_prompt="Accept these rules?"
+        if [ "$has_existing_rules" = "true" ]; then
+            rules_prompt="Replace your existing rules with these suggested rules?"
+        fi
+        if ! prompt_yesno "$rules_prompt" true; then
+            log_info "Keeping existing rules from your .parcel.json."
+            rules_json="$(printf '%s' "$config_json" | jq '.rules // []')"
+        fi
+    elif $YES; then
+        # In --yes mode, keep existing rules if any, otherwise use detected
+        if [ "$(printf '%s' "$config_json" | jq '.rules | length')" -gt 0 ]; then
+            rules_json="$(printf '%s' "$config_json" | jq '.rules')"
+        fi
+    fi
+
+    # Ask about non-rule settings
+    local passkey_dir allow_links allow_external_links audit_decrypt
+    local git_in_passkey handle_http_auth handle_passkeys save_history
+    local fill_related disable_context_popup default_rules
+
+    passkey_dir="$(prompt "passkeyDir" "$(printf '%s' "$config_json" | jq -r '.passkeyDir // "passkeys"')")"
+    allow_links="$(prompt "allowLinks (true/false)" "$(printf '%s' "$config_json" | jq -r '.allowLinks // false')")"
+    allow_external_links="$(prompt "allowExternalLinks (true/false)" "$(printf '%s' "$config_json" | jq -r '.allowExternalLinks // false')")"
+    audit_decrypt="$(prompt "auditDecrypt (true/false)" "$(printf '%s' "$config_json" | jq -r '.auditDecrypt // false')")"
+    git_in_passkey="$(prompt "gitInPasskeyCommand (true/false)" "$(printf '%s' "$config_json" | jq -r '.gitInPasskeyCommand // false')")"
+    handle_http_auth="$(prompt "handleHttpAuth (true/false)" "$(printf '%s' "$config_json" | jq -r '.handleHttpAuth // true')")"
+    handle_passkeys="$(prompt "handlePasskeys (true/false)" "$(printf '%s' "$config_json" | jq -r '.handlePasskeys // true')")"
+    save_history="$(prompt "saveHistory (true/false)" "$(printf '%s' "$config_json" | jq -r '.saveHistory // true')")"
+    fill_related="$(prompt "fillRelated (true/false)" "$(printf '%s' "$config_json" | jq -r '.fillRelated // true')")"
+    disable_context_popup="$(prompt "disableContextPopup (true/false)" "$(printf '%s' "$config_json" | jq -r '.disableContextPopup // false')")"
+    default_rules="$(prompt "defaultRules (true/false)" "$(printf '%s' "$config_json" | jq -r '.defaultRules // false')")"
+
+    # Normalise booleans
+    normalise_bool() {
+        case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+            true|t|yes|y|1) echo "true" ;;
+            *) echo "false" ;;
+        esac
+    }
+
+    allow_links="$(normalise_bool "$allow_links")"
+    allow_external_links="$(normalise_bool "$allow_external_links")"
+    audit_decrypt="$(normalise_bool "$audit_decrypt")"
+    git_in_passkey="$(normalise_bool "$git_in_passkey")"
+    handle_http_auth="$(normalise_bool "$handle_http_auth")"
+    handle_passkeys="$(normalise_bool "$handle_passkeys")"
+    save_history="$(normalise_bool "$save_history")"
+    fill_related="$(normalise_bool "$fill_related")"
+    disable_context_popup="$(normalise_bool "$disable_context_popup")"
+    default_rules="$(normalise_bool "$default_rules")"
+
+    # Build the final config. Only include a setting if:
+    #   - it was already present in the existing .parcel.json, OR
+    #   - the user's value differs from the schema default
+    # passdir and modified are internal, never written.
+    local final_config
+    final_config="$(printf '%s' "$config_json" | jq \
+        --arg passkeyDir "$passkey_dir" \
+        --argjson allowLinks "$allow_links" \
+        --argjson allowExternalLinks "$allow_external_links" \
+        --argjson auditDecrypt "$audit_decrypt" \
+        --argjson gitInPasskeyCommand "$git_in_passkey" \
+        --argjson handleHttpAuth "$handle_http_auth" \
+        --argjson handlePasskeys "$handle_passkeys" \
+        --argjson saveHistory "$save_history" \
+        --argjson fillRelated "$fill_related" \
+        --argjson disableContextPopup "$disable_context_popup" \
+        --argjson defaultRules "$default_rules" \
+        --argjson rules "$rules_json" \
+        '
+        # Start from existing config, strip internal fields
+        del(.passdir, .modified)
+        # Only set each field if value differs from default or was already present
+        | if $allowLinks != false or has("allowLinks") then .allowLinks = $allowLinks else del(.allowLinks) end
+        | if $allowExternalLinks != false or has("allowExternalLinks") then .allowExternalLinks = $allowExternalLinks else del(.allowExternalLinks) end
+        | if $auditDecrypt != false or has("auditDecrypt") then .auditDecrypt = $auditDecrypt else del(.auditDecrypt) end
+        | if $gitInPasskeyCommand != false or has("gitInPasskeyCommand") then .gitInPasskeyCommand = $gitInPasskeyCommand else del(.gitInPasskeyCommand) end
+        | if $handleHttpAuth != true or has("handleHttpAuth") then .handleHttpAuth = $handleHttpAuth else del(.handleHttpAuth) end
+        | if $handlePasskeys != true or has("handlePasskeys") then .handlePasskeys = $handlePasskeys else del(.handlePasskeys) end
+        | if $saveHistory != true or has("saveHistory") then .saveHistory = $saveHistory else del(.saveHistory) end
+        | if $fillRelated != true or has("fillRelated") then .fillRelated = $fillRelated else del(.fillRelated) end
+        | if $disableContextPopup != false or has("disableContextPopup") then .disableContextPopup = $disableContextPopup else del(.disableContextPopup) end
+        | if $defaultRules != false or has("defaultRules") then .defaultRules = $defaultRules else del(.defaultRules) end
+        | if $passkeyDir != "passkeys" or has("passkeyDir") then .passkeyDir = $passkeyDir else del(.passkeyDir) end
+        | .rules = $rules
+        ')"
+
+    # Preview
+    printf '\n' >&2
+    log_info "Generated .parcel.json:"
+    printf '%s\n' "$final_config" | jq '.' >&2
+    printf '\n' >&2
+
+    # Confirm and write
+    if $YES || prompt_yesno "Write this config to $parcelfile?" true; then
+        printf '%s\n' "$final_config" > "$parcelfile"
+        log_success "Written: $parcelfile"
+    else
+        log_info "Config not written."
+    fi
+}
+
+# ===========================================================================
+# Signal handling
+# ===========================================================================
+
+# Clean up temporary files.
+# @since 1.0.7
+cleanup() {
+    local f
+    for f in $TEMP_FILES; do
+        rm -f "$f" 2>/dev/null || true
+    done
+}
+
+# Handle interrupt signals.
+# @param {number} signal_name - Name of the signal.
+# @since 1.0.7
+on_signal() {
+    printf '\n' >&2
+    log_warn "Interrupted during $PHASE phase"
+    if [ "${PHASE#apply}" != "$PHASE" ]; then
+        log_warn "Partial changes may exist — check what was completed"
+    fi
+    cleanup
+    exit 3
+}
+
+# ===========================================================================
+# Main dispatch
+# ===========================================================================
+
+# Main entry point. Parses args, loads config, and dispatches to the right phase.
+# @since 1.0.7
+main() {
+    newline='
+'
+    trap on_signal INT TERM
+    trap cleanup EXIT
+
+    parse_args "$@"
+    load_dev_fallback
+    detect_platform
+    check_dependencies
+
+    # Parse config values needed for all actions
+    HOST_NAME="$(config_query '.hostName')"
+    EXT_ID_CHROMIUM="$(config_query '.extensionIds.chromium')"
+    EXT_ID_FIREFOX="$(config_query '.extensionIds.firefox')"
+
+    case "$ACTION" in
+        install)
+            resolve_prefix
+            detect_password_store
+            run_detect
+            preview_install
+            apply_install
+            ;;
+        uninstall)
+            resolve_prefix
+            do_uninstall
+            ;;
+        config)
+            detect_password_store
+            run_config_builder
+            ;;
+    esac
+}
+
+main "$@"
