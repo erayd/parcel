@@ -1003,19 +1003,17 @@ preview_uninstall() {
     while [ "$i" -lt "$browser_count" ]; do
         local name manifest_dir key
         name="$(config_query ".browsers[$i].name")"
-        for level in system user; do
-            local os_key="$OS"
-            [ "$os_key" = "bsd" ] && os_key="linux"
-            key="$os_key-$level"
-            manifest_dir="$(config_query ".browsers[$i].manifestDir[\"$key\"]?")"
-            if [ -n "$manifest_dir" ]; then
-                manifest_dir="$(expand_tilde "$manifest_dir")"
-                local manifest_path="$manifest_dir/$HOST_NAME.json"
-                if [ -f "$manifest_path" ]; then
-                    log_info "  $manifest_path"
-                fi
+        local os_key="$OS"
+        [ "$os_key" = "bsd" ] && os_key="linux"
+        key="$os_key-$RESOLVED_LEVEL"
+        manifest_dir="$(config_query ".browsers[$i].manifestDir[\"$key\"]?")"
+        if [ -n "$manifest_dir" ]; then
+            manifest_dir="$(expand_tilde "$manifest_dir")"
+            local manifest_path="$manifest_dir/$HOST_NAME.json"
+            if [ -f "$manifest_path" ]; then
+                log_info "  $manifest_path"
             fi
-        done
+        fi
         i=$((i + 1))
     done
 
@@ -1615,22 +1613,21 @@ do_uninstall() {
     while [ "$i" -lt "$browser_count" ]; do
         local name
         name="$(config_query ".browsers[$i].name")"
-        for level in system user; do
-            local os_key="$OS"
-            [ "$os_key" = "bsd" ] && os_key="linux"
-            local key="$os_key-$level"
-            local manifest_dir
-            manifest_dir="$(config_query ".browsers[$i].manifestDir[\"$key\"]?")"
-            if [ -n "$manifest_dir" ]; then
-                manifest_dir="$(expand_tilde "$manifest_dir")"
-                local manifest_path="$manifest_dir/$HOST_NAME.json"
-                if [ -f "$manifest_path" ]; then
-                    rm -f "$manifest_path"
-                    log_success "Removed: $manifest_path"
-                    removed="$removed manifest-$name-$level"
-                fi
+        # Only remove manifests for the current install level
+        local os_key="$OS"
+        [ "$os_key" = "bsd" ] && os_key="linux"
+        local key="$os_key-$RESOLVED_LEVEL"
+        local manifest_dir
+        manifest_dir="$(config_query ".browsers[$i].manifestDir[\"$key\"]?")"
+        if [ -n "$manifest_dir" ]; then
+            manifest_dir="$(expand_tilde "$manifest_dir")"
+            local manifest_path="$manifest_dir/$HOST_NAME.json"
+            if [ -f "$manifest_path" ]; then
+                rm -f "$manifest_path"
+                log_success "Removed: $manifest_path"
+                removed="$removed manifest-$name-$RESOLVED_LEVEL"
             fi
-        done
+        fi
         i=$((i + 1))
     done
 
