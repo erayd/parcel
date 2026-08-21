@@ -1190,7 +1190,10 @@ install_bootstrap_host() {
     printf '%s' "$BOOTSTRAP_HOST" > "$tmp_host"
 
     # Install
-    if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
+    if [ "$RESOLVED_LEVEL" = "system" ]; then
+        mkdir -p "$HOST_BIN_DIR"
+        install -m 0755 "$tmp_host" "$HOST_BIN_PATH"
+    elif [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
         local primary_group
         primary_group="$(id -gn "$SERVICES_USER" 2>/dev/null || true)"
         if [ -n "$primary_group" ]; then
