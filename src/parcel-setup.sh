@@ -274,7 +274,7 @@ manifest_key() {
 # @returns {string} Escaped string on stdout.
 # @since 1.0.7
 escape_regex() {
-    printf '%s' "$1" | sed 's/[][.^$*+?{}\\|()]/\\&/g'
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/[]^$*+?.{}|()[]/\\&/g'
 }
 
 # ===========================================================================
