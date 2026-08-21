@@ -2130,7 +2130,6 @@ main() {
     trap cleanup EXIT
 
     detect_nixos
-    parse_args "$@"
     load_dev_fallback
     detect_platform
 
@@ -2138,6 +2137,7 @@ main() {
     if [ -n "$SERVICES_USER" ]; then
         HOME="$(get_user_home)"
     fi
+    parse_args "$@"
     check_dependencies
 
     # Parse config values needed for all actions
