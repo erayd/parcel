@@ -90,8 +90,18 @@ endif
 todo:
 	@./scripts/todo.sh
 
+# shellcheck is a dev-only dependency for linting the native hosts and setup script.
+# Fail with a clear hint rather than an opaque "command not found".
+.PHONY: require-shellcheck
+require-shellcheck:
+	@command -v shellcheck >/dev/null 2>&1 || { \
+		echo "Error: shellcheck is required but was not found." >&2; \
+		echo "       Install it, e.g. 'brew install shellcheck' or 'apt install shellcheck'." >&2; \
+		exit 1; \
+	}
+
 .PHONY: test-native
-test-native:
+test-native: require-shellcheck
 	bash -n src/parcel-host parcel-host
 	shellcheck -x src/parcel-host parcel-host
 	node --test $(TEST_FLAGS) test/native-host.test.js
@@ -115,7 +125,7 @@ test-syntax:
 	$(ESLINT) .
 
 .PHONY: test-setup
-test-setup:
+test-setup: require-shellcheck
 	bash -n src/parcel-setup.sh
 	shellcheck -x src/parcel-setup.sh
 

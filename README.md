@@ -46,6 +46,7 @@ If you wish to run the test suite, you will also need the following:
 
 - **Node.js**
 - **JSDom** and **Prettier** (`make install-deps`)
+- **ShellCheck** (to lint the native hosts and setup script)
 
 ### Key components
 

@@ -392,7 +392,7 @@ resolve_install_level() {
     [ "$ACTION" = "uninstall" ] && verb="Uninstall"
     if prompt_yesno "$verb system-wide? (requires sudo)" true; then
         log_info "Re-running with sudo for system-wide $ACTION..."
-        exec sudo "$0" --system "$@"
+        exec sudo bash "$0" --system "$@"
     fi
     INSTALL_LEVEL="user"
 }
@@ -463,7 +463,7 @@ parse_args() {
             die "System install requires root (re-run with sudo, or use --user)"
         fi
         log_info "Re-running with sudo for system-wide $ACTION..."
-        exec sudo "$0" "${orig_args[@]}"
+        exec sudo bash "$0" "${orig_args[@]}"
     fi
 
     RESOLVED_LEVEL="$INSTALL_LEVEL"
@@ -1194,6 +1194,8 @@ install_bootstrap_host() {
         mkdir -p "$HOST_BIN_DIR"
         install -m 0755 "$tmp_host" "$HOST_BIN_PATH"
     elif [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
+        mkdir -p "$HOST_BIN_DIR"
+        chown "$SERVICES_USER" "$HOST_BIN_DIR" 2>/dev/null || true
         local primary_group
         primary_group="$(id -gn "$SERVICES_USER" 2>/dev/null || true)"
         if [ -n "$primary_group" ]; then
@@ -1349,8 +1351,13 @@ install_flatpak_wrappers() {
         }
 
         # Generate and install wrapper
-        generate_flatpak_wrapper "$HOST_BIN_PATH" > "$wrapper_path"
-        chmod 0755 "$wrapper_path"
+        if generate_flatpak_wrapper "$HOST_BIN_PATH" > "$wrapper_path" && [ -s "$wrapper_path" ]; then
+            chmod 0755 "$wrapper_path"
+        else
+            log_error "Failed to write flatpak wrapper: $wrapper_path"
+            INSTALL_ERRORS=$((INSTALL_ERRORS + 1))
+            continue
+        fi
 
         # Fix ownership if running as root
         if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
@@ -1396,9 +1403,14 @@ install_flatpak_wrappers() {
 
         if [ -n "$manifest_dir" ]; then
             mkdir -p "$manifest_dir" 2>/dev/null || true
-            generate_manifest "$engine" "$wrapper_path" "$HOST_NAME" "$ext_id" true > "$manifest_path"
-            if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ] && [ -f "$manifest_path" ]; then
-                chown "$SERVICES_USER" "$manifest_path" 2>/dev/null || true
+            if generate_manifest "$engine" "$wrapper_path" "$HOST_NAME" "$ext_id" true > "$manifest_path" 2>/dev/null \
+                && [ -f "$manifest_path" ]; then
+                if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
+                    chown "$SERVICES_USER" "$manifest_path" 2>/dev/null || true
+                fi
+            else
+                log_error "Failed to install flatpak manifest for $app_id"
+                INSTALL_ERRORS=$((INSTALL_ERRORS + 1))
             fi
         fi
 
@@ -1816,11 +1828,19 @@ do_uninstall() {
     if $REMOVE_CONFIG; then
         local parcelrc_dir="$HOME/.config/parcel"
         local parcelfile="$PASSWORD_STORE_DIR/.parcel.json"
-        if [ -d "$parcelrc_dir" ]; then
-            rm -rf "$parcelrc_dir"
-            log_success "Removed: $parcelrc_dir"
-            removed="$removed parcelrc-dir"
-        fi
+        case "$parcelrc_dir" in
+            /*/.config/parcel)
+                if [ -d "$parcelrc_dir" ]; then
+                    rm -rf "$parcelrc_dir"
+                    log_success "Removed: $parcelrc_dir"
+                    removed="$removed parcelrc-dir"
+                fi
+                ;;
+            *)
+                # Refuse to remove anything other than the dedicated absolute config path.
+                log_warn "Refusing to remove unexpected config path: $parcelrc_dir"
+                ;;
+        esac
         if [ -f "$parcelfile" ]; then
             rm -f "$parcelfile"
             log_success "Removed: $parcelfile"
