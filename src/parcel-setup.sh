@@ -377,9 +377,14 @@ parse_args() {
         case "$1" in
             --system) INSTALL_LEVEL="system" ;;
             --user) INSTALL_LEVEL="user" ;;
-            --prefix) shift; PREFIX_OVERRIDE="$1" ;;
+            --prefix)
+                shift
+                [ $# -gt 0 ] || die "--prefix requires an argument"
+                PREFIX_OVERRIDE="$1"
+                ;;
             --browser)
                 shift
+                [ $# -gt 0 ] || die "--browser requires an argument"
                 if [ -z "$BROWSER_FILTER" ]; then
                     BROWSER_FILTER="$1"
                 else
@@ -396,7 +401,11 @@ parse_args() {
             --remove-config) REMOVE_CONFIG=true ;;
             --flatpak-only) FLATPAK_ONLY=true ;;
             --verbose) VERBOSE=true ;;
-            --passdir) shift; PASSWORD_STORE_DIR="$(expand_tilde "$1")" ;;
+            --passdir)
+                shift
+                [ $# -gt 0 ] || die "--passdir requires an argument"
+                PASSWORD_STORE_DIR="$(expand_tilde "$1")"
+                ;;
             --passdir=*) PASSWORD_STORE_DIR="$(expand_tilde "${1#*=}")" ;;
             --help|-h)
                 print_usage
