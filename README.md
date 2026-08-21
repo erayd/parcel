@@ -111,15 +111,15 @@ make clean
 
 ### Set up the native host
 
-Parcel uses a native-messaging host to communicate with `gpg` and your password store. The recommended way to install it is with the setup script from the [latest release](https://github.com/erayd/parcel/releases).
+Parcel uses a native-messaging host to communicate with `gpg` and your password store. The recommended way to install it is with the setup script from the [latest release](https://github.com/parcel-pm/parcel/releases).
 
 The setup script is a single self-contained file with the bootstrap host and browser configuration embedded inside it.
 
 **1. Download and verify the script:**
 
 ```bash
-curl -LO https://github.com/erayd/parcel/releases/latest/download/parcel-setup.sh
-curl -LO https://github.com/erayd/parcel/releases/latest/download/parcel-setup.sh.asc
+curl -LO https://github.com/parcel-pm/parcel/releases/latest/download/parcel-setup.sh
+curl -LO https://github.com/parcel-pm/parcel/releases/latest/download/parcel-setup.sh.asc
 gpg --verify parcel-setup.sh.asc parcel-setup.sh
 ```
 
