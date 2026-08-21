@@ -1253,9 +1253,8 @@ install_native_manifests() {
         fi
 
         # Generate and write the manifest
-        generate_manifest "$engine" "$HOST_BIN_PATH" "$HOST_NAME" "$ext_id" false > "$manifest_path"
-
-        if [ $? -eq 0 ] && [ -f "$manifest_path" ]; then
+        if generate_manifest "$engine" "$HOST_BIN_PATH" "$HOST_NAME" "$ext_id" false > "$manifest_path" 2>/dev/null \
+            && [ -f "$manifest_path" ]; then
             log_success "Manifest installed: $name"
             APPLIED_CHANGES="$APPLIED_CHANGES manifest-$name"
 
@@ -1445,9 +1444,6 @@ first_smoke_test() {
 second_smoke_test() {
     log_info "Running second smoke test (verification)..."
     PHASE="apply-smoke2"
-
-    local parcelrc_changes_before
-    parcelrc_changes_before="$APPLIED_PARCELRC_CHANGES"
 
     run_host_as_user "$HOST_BIN_PATH"
     local rc=$?
@@ -1819,8 +1815,6 @@ run_config_builder() {
     log_info "Scanning password store..."
     local tree_output
     tree_output="$(find "$PASSWORD_STORE_DIR" -type d -not -path '*/.git/*' -not -name '.git' 2>/dev/null | sort)"
-    local gpg_files
-    gpg_files="$(find "$PASSWORD_STORE_DIR" -name '*.gpg' -not -path '*/.git/*' 2>/dev/null | sort)"
 
     # Show directory structure
     printf '\n' >&2
@@ -1828,7 +1822,7 @@ run_config_builder() {
         log_info "Directory structure:"
         local dir
         while IFS= read -r dir; do
-            local rel_dir="${dir#$PASSWORD_STORE_DIR}"
+            local rel_dir="${dir#"$PASSWORD_STORE_DIR"}"
             [ -z "$rel_dir" ] && rel_dir="/"
             local count
             count="$(find "$dir" -maxdepth 1 -name '*.gpg' 2>/dev/null | wc -l | tr -d ' ')"
@@ -1841,8 +1835,6 @@ run_config_builder() {
 
     # Auto-detect rules based on common patterns
     local rules_json="[]"
-    local detected_dirs
-    detected_dirs="$(find "$PASSWORD_STORE_DIR" -type d -not -path '*/.git/*' -not -name '.git' 2>/dev/null | sort)"
 
     # Detect top-level credential-type subdirs
     # Skip the password-store root itself and any dotfile/dotdir

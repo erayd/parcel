@@ -112,8 +112,13 @@ test-syntax:
 	$(MAKE) -C ./src PRETTIER=$(PRETTIER) prettier-check
 	$(ESLINT) .
 
+.PHONY: test-setup
+test-setup:
+	bash -n src/parcel-setup.sh
+	shellcheck -x src/parcel-setup.sh
+
 .PHONY: test
-test: test-syntax
+test: test-syntax test-setup
 	node --test $(TEST_FLAGS) \
 		test/chrome-api-mock.test.js \
 		test/helpers.test.js \
