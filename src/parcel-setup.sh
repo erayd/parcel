@@ -1482,12 +1482,14 @@ second_smoke_test() {
 
     if [ $rc -ne 0 ]; then
         log_error "Second smoke test failed (exit code $rc)"
-        log_error "Reverting parcelrc customisations applied in this step"
 
-        # Revert: remove any lines we added. Since we track what we changed,
-        # we can remove those specific lines. For now, report the issue.
-        # A full revert would require backup/restore of the parcelrc.
+        # Revert parcelrc customisations if we have a backup
         local parcelrc="$HOME/.config/parcel/parcelrc"
+        if [ -n "$PARCELRC_BACKUP" ] && [ -f "$PARCELRC_BACKUP" ]; then
+            cp "$PARCELRC_BACKUP" "$parcelrc"
+            log_error "Reverted parcelrc customisations: $APPLIED_PARCELRC_CHANGES"
+        fi
+
         log_error "Check the parcel-host log for details:"
         log_error "  $HOME/.local/log/parcel-host.log"
         die "Smoke test verification failed"
@@ -1553,6 +1555,9 @@ set_parcelrc_var() {
 # The list of parcelrc changes applied (for revert tracking).
 APPLIED_PARCELRC_CHANGES=""
 
+# Backup of parcelrc taken before applying customisations (for revert on failure).
+PARCELRC_BACKUP=""
+
 # Apply parcelrc customisations for tool paths and password store.
 # Applied before the second smoke test so they are included in verification.
 # GPG/JQ are only overwritten if the existing value was broken (FORCE_GPG/FORCE_JQ).
@@ -1568,6 +1573,10 @@ apply_parcelrc_customisations() {
     fi
 
     log_info "Applying parcelrc customisations..."
+
+    # Back up parcelrc so we can revert if the second smoke test fails
+    PARCELRC_BACKUP="$(make_temp)"
+    cp "$parcelrc" "$PARCELRC_BACKUP" 2>/dev/null || PARCELRC_BACKUP=""
 
     # Fix ownership if running as root
     if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
