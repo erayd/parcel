@@ -1348,14 +1348,14 @@ install_flatpak_wrappers() {
             continue
         }
 
+        # Generate and install wrapper
+        generate_flatpak_wrapper "$HOST_BIN_PATH" > "$wrapper_path"
+        chmod 0755 "$wrapper_path"
+
         # Fix ownership if running as root
         if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
             chown -R "$SERVICES_USER" "$wrapper_dir" 2>/dev/null || true
         fi
-
-        # Generate and install wrapper
-        generate_flatpak_wrapper "$HOST_BIN_PATH" > "$wrapper_path"
-        chmod 0755 "$wrapper_path"
 
         # Find the browser's name to get its engine and manifest dir
         local fp_count browser_name engine ext_id
@@ -1397,6 +1397,9 @@ install_flatpak_wrappers() {
         if [ -n "$manifest_dir" ]; then
             mkdir -p "$manifest_dir" 2>/dev/null || true
             generate_manifest "$engine" "$wrapper_path" "$HOST_NAME" "$ext_id" true > "$manifest_path"
+            if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ] && [ -f "$manifest_path" ]; then
+                chown "$SERVICES_USER" "$manifest_path" 2>/dev/null || true
+            fi
         fi
 
         # Apply flatpak override (must run as the real user)
