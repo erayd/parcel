@@ -42,6 +42,7 @@ VERBOSE=false
 # Detected platform
 OS=""
 ARCH=""
+IS_NIXOS="${IS_NIXOS:-false}"
 
 # Resolved install configuration
 RESOLVED_LEVEL="system"
@@ -352,6 +353,16 @@ resolve_install_level() {
         return
     fi
 
+    # NixOS: user-level only, no prompt
+    if $IS_NIXOS; then
+        if [ "$INSTALL_LEVEL" != "user" ]; then
+        printf '  \033[1;31m!\033[0m \033[1;31mNixOS detected - proceeding with user-level install.\033[0m\n' >&2
+        printf '  \033[1;31m!\033[0m \033[1;31mSystem-level install is not supported; use the manual setup per the README if needed.\033[0m\n' >&2
+        fi
+        INSTALL_LEVEL="user"
+        return
+    fi
+
     # Non-interactive or config-only: no prompt needed
     if $YES || [ "$ACTION" = "config" ]; then
         INSTALL_LEVEL="user"
@@ -423,6 +434,11 @@ parse_args() {
         resolve_install_level "${orig_args[@]}"
     fi
 
+    # Refuse system-level install on NixOS
+    if [ "$INSTALL_LEVEL" = "system" ] && $IS_NIXOS; then
+        die "Automated system-level install is not supported on NixOS. Please use --user for a user-level install, or set up the native host manually per the README."
+    fi
+
     # Auto re-exec with sudo for explicit --system when not root
     if [ "$INSTALL_LEVEL" = "system" ] && [ "$(id -u)" -ne 0 ]; then
         if $YES; then
@@ -483,6 +499,18 @@ detect_platform() {
     esac
 
     log_success "Platform: $OS ($ARCH)"
+}
+
+# Detect whether running on NixOS or with the nix package manager.
+# @since 1.0.7
+detect_nixos() {
+    if [ "${IS_NIXOS:-}" = "true" ]; then
+        return
+    fi
+    IS_NIXOS=false
+    if [ -d /nix/store ]; then
+        IS_NIXOS=true
+    fi
 }
 
 # ===========================================================================
@@ -846,10 +874,19 @@ run_detect() {
     PHASE="detect"
     log_section "Detection"
 
-    detect_browsers
+    if $IS_NIXOS; then
+        printf '  \033[1;31m!\033[0m \033[1;31mNixOS detected - native (non-flatpak) browsers require manual\033[0m\n' >&2
+        printf '  \033[1;31m!\033[0m \033[1;31mmanifest setup. See the README'"'"'s Manual native host installation\033[0m\n' >&2
+        printf '  \033[1;31m!\033[0m \033[1;31msection. Flatpak browsers are detected and configured automatically.\033[0m\n' >&2
+        printf '\n' >&2
+    else
+        detect_browsers
+    fi
     detect_flatpak_browsers
     confirm_browsers
-    detect_tool_paths
+    if ! $IS_NIXOS; then
+        detect_tool_paths
+    fi
     offer_host_hash
 }
 
@@ -904,7 +941,7 @@ preview_install() {
         printf '\n' >&2
 
         # Native manifests
-        if [ -n "$DETECTED_BROWSERS" ]; then
+        if ! $IS_NIXOS && [ -n "$DETECTED_BROWSERS" ]; then
             log_info "  Generate & install native messaging manifests:"
             local name
             for name in $DETECTED_BROWSERS; do
@@ -1010,25 +1047,27 @@ preview_uninstall() {
     fi
 
     # Native manifests
-    local browser_count
-    browser_count="$(config_query '.browsers | length')"
-    local i=0
-    while [ "$i" -lt "$browser_count" ]; do
-        local name manifest_dir key
-        name="$(config_query ".browsers[$i].name")"
-        local os_key="$OS"
-        [ "$os_key" = "bsd" ] && os_key="linux"
-        key="$os_key-$RESOLVED_LEVEL"
-        manifest_dir="$(config_query ".browsers[$i].manifestDir[\"$key\"]?")"
-        if [ -n "$manifest_dir" ]; then
-            manifest_dir="$(expand_tilde "$manifest_dir")"
-            local manifest_path="$manifest_dir/$HOST_NAME.json"
-            if [ -f "$manifest_path" ]; then
-                log_info "  $manifest_path"
+    if ! $IS_NIXOS; then
+        local browser_count
+        browser_count="$(config_query '.browsers | length')"
+        local i=0
+        while [ "$i" -lt "$browser_count" ]; do
+            local name manifest_dir key
+            name="$(config_query ".browsers[$i].name")"
+            local os_key="$OS"
+            [ "$os_key" = "bsd" ] && os_key="linux"
+            key="$os_key-$RESOLVED_LEVEL"
+            manifest_dir="$(config_query ".browsers[$i].manifestDir[\"$key\"]?")"
+            if [ -n "$manifest_dir" ]; then
+                manifest_dir="$(expand_tilde "$manifest_dir")"
+                local manifest_path="$manifest_dir/$HOST_NAME.json"
+                if [ -f "$manifest_path" ]; then
+                    log_info "  $manifest_path"
+                fi
             fi
-        fi
-        i=$((i + 1))
-    done
+            i=$((i + 1))
+        done
+    fi
 
     # Flatpak wrappers and overrides
     if $HAS_FLATPAK; then
@@ -1547,6 +1586,13 @@ summary_report() {
     log_info "Log file: $HOME/.local/log/parcel-host.log"
     printf '\n' >&2
 
+    # NixOS guidance
+    if $IS_NIXOS; then
+        log_info "For nix-native browsers, set up native messaging manually per"
+        log_info "the README (or use flatpak browsers, which are configured automatically)."
+        printf '\n' >&2
+    fi
+
     # Offer config builder
     if [ "$ACTION" = "install" ] && ! $YES; then
         if [ -d "$PASSWORD_STORE_DIR" ]; then
@@ -1581,7 +1627,9 @@ apply_install() {
     log_section "Applying"
 
     install_bootstrap_host
-    install_native_manifests
+    if ! $IS_NIXOS; then
+        install_native_manifests
+    fi
     install_flatpak_wrappers
 
     # First smoke test (creates parcelrc)
@@ -1621,29 +1669,31 @@ do_uninstall() {
     fi
 
     # Remove native messaging manifests
-    local browser_count
-    browser_count="$(config_query '.browsers | length')"
-    local i=0
-    while [ "$i" -lt "$browser_count" ]; do
-        local name
-        name="$(config_query ".browsers[$i].name")"
-        # Only remove manifests for the current install level
-        local os_key="$OS"
-        [ "$os_key" = "bsd" ] && os_key="linux"
-        local key="$os_key-$RESOLVED_LEVEL"
-        local manifest_dir
-        manifest_dir="$(config_query ".browsers[$i].manifestDir[\"$key\"]?")"
-        if [ -n "$manifest_dir" ]; then
-            manifest_dir="$(expand_tilde "$manifest_dir")"
-            local manifest_path="$manifest_dir/$HOST_NAME.json"
-            if [ -f "$manifest_path" ]; then
-                rm -f "$manifest_path"
-                log_success "Removed: $manifest_path"
-                removed="$removed manifest-$name-$RESOLVED_LEVEL"
+    if ! $IS_NIXOS; then
+        local browser_count
+        browser_count="$(config_query '.browsers | length')"
+        local i=0
+        while [ "$i" -lt "$browser_count" ]; do
+            local name
+            name="$(config_query ".browsers[$i].name")"
+            # Only remove manifests for the current install level
+            local os_key="$OS"
+            [ "$os_key" = "bsd" ] && os_key="linux"
+            local key="$os_key-$RESOLVED_LEVEL"
+            local manifest_dir
+            manifest_dir="$(config_query ".browsers[$i].manifestDir[\"$key\"]?")"
+            if [ -n "$manifest_dir" ]; then
+                manifest_dir="$(expand_tilde "$manifest_dir")"
+                local manifest_path="$manifest_dir/$HOST_NAME.json"
+                if [ -f "$manifest_path" ]; then
+                    rm -f "$manifest_path"
+                    log_success "Removed: $manifest_path"
+                    removed="$removed manifest-$name-$RESOLVED_LEVEL"
+                fi
             fi
-        fi
-        i=$((i + 1))
-    done
+            i=$((i + 1))
+        done
+    fi
 
     # Remove flatpak wrappers and overrides
     if $HAS_FLATPAK; then
@@ -1974,6 +2024,7 @@ main() {
     trap on_signal INT TERM
     trap cleanup EXIT
 
+    detect_nixos
     parse_args "$@"
     load_dev_fallback
     detect_platform
