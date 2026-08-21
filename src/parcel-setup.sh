@@ -932,15 +932,30 @@ preview_install() {
 
         # parcrelrc customisations
         local rc_changes=""
-        [ -n "$CUSTOM_GPG" ] && rc_changes="$rc_changes GPG=$CUSTOM_GPG"
-        [ -n "$CUSTOM_JQ" ] && rc_changes="$rc_changes JQ=$CUSTOM_JQ"
-        $WANTS_HOST_HASH && rc_changes="$rc_changes HOST_HASH=$SIGNED_HOST_SHA256"
-        [ -n "$CUSTOM_PASSWORD_STORE_DIR" ] && rc_changes="$rc_changes PASSWORD_STORE_DIR=$CUSTOM_PASSWORD_STORE_DIR"
+        [ -n "$CUSTOM_GPG" ] && rc_changes="${rc_changes}GPG=$CUSTOM_GPG$newline"
+        [ -n "$CUSTOM_JQ" ] && rc_changes="${rc_changes}JQ=$CUSTOM_JQ$newline"
+        $WANTS_HOST_HASH && rc_changes="${rc_changes}HOST_HASH=$SIGNED_HOST_SHA256$newline"
+        if [ -n "$CUSTOM_PASSWORD_STORE_DIR" ]; then
+            local user_home parcelrc_check existing_passdir
+            user_home="$(get_user_home)"
+            parcelrc_check="$user_home/.config/parcel/parcelrc"
+            existing_passdir=""
+            if [ -f "$parcelrc_check" ]; then
+                existing_passdir="$(sed -n 's/^PASSWORD_STORE_DIR="\(.*\)"$/\1/p' "$parcelrc_check" 2>/dev/null)"
+            fi
+            if [ -n "$existing_passdir" ] && [ "$existing_passdir" != "$CUSTOM_PASSWORD_STORE_DIR" ]; then
+                rc_changes="${rc_changes}PASSWORD_STORE_DIR=$CUSTOM_PASSWORD_STORE_DIR (overwrite)$newline"
+            else
+                rc_changes="${rc_changes}PASSWORD_STORE_DIR=$CUSTOM_PASSWORD_STORE_DIR$newline"
+            fi
+        fi
         if [ -n "$rc_changes" ]; then
-            log_info "  Apply parcelrc customisations (stricter-only):"
-            for change in $rc_changes; do
+            log_info "  Apply parcelrc customisations:"
+            local change
+            while IFS= read -r change; do
+                [ -z "$change" ] && continue
                 log_info "    $change"
-            done
+            done <<< "$rc_changes"
             printf '\n' >&2
         fi
 
@@ -1374,40 +1389,49 @@ second_smoke_test() {
 
 # Set a variable in parcelrc if not already set.
 # Inserts the value below the commented-out default line for the same variable.
-# Does nothing if the variable is already set to a non-default value.
+# Does nothing if the variable is already set, unless "force" is specified.
 # @param {string} parcelrc_path - Path to the parcelrc file.
 # @param {string} varname - Variable name (e.g. GPG, JQ, HOST_HASH).
 # @param {string} value - Value to set.
-# @returns {boolean} 0 if value was applied, 1 if already set.
+# @param {string} [force] - If "force", overwrites an existing value.
+# @returns {boolean} 0 if value was applied, 1 if already set and not forced.
 # @since 1.0.7
 set_parcelrc_var() {
-    local parcelrc_path="$1" varname="$2" value="$3"
-
-    # Check if the variable is already set (uncommented)
-    if grep -q "^${varname}=" "$parcelrc_path" 2>/dev/null; then
-        return 1  # Already set, leave it alone
-    fi
-
-    # Insert below the commented-out default line, or append to end
+    local parcelrc_path="$1" varname="$2" value="$3" force="${4:-}"
     local tmpfile
     tmpfile="$(make_temp)"
-    awk -v var="$varname" -v val="$value" '
-        {
-            print
-            if (!found && $0 ~ "^#[[:space:]]*" var "=") {
-                print var "=\"" val "\""
-                found = 1
+
+    if [ "$force" = "force" ] && grep -q "^${varname}=" "$parcelrc_path" 2>/dev/null; then
+        # Replace the existing uncommented line
+        awk -v var="$varname" -v val="$value" '
+            $0 ~ "^" var "=" { print var "=\"" val "\""; next }
+            { print }
+        ' "$parcelrc_path" > "$tmpfile"
+    else
+        # Check if the variable is already set (uncommented)
+        if grep -q "^${varname}=" "$parcelrc_path" 2>/dev/null; then
+            return 1  # Already set, leave it alone
+        fi
+
+        # Insert below the commented-out default line, or append to end
+        awk -v var="$varname" -v val="$value" '
+            {
+                print
+                if (!found && $0 ~ "^#[[:space:]]*" var "=") {
+                    print var "=\"" val "\""
+                    found = 1
+                }
             }
-        }
-        END {
-            if (!found) {
-                print var "=\"" val "\""
+            END {
+                if (!found) {
+                    print var "=\"" val "\""
+                }
             }
-        }
-    ' "$parcelrc_path" > "$tmpfile"
+        ' "$parcelrc_path" > "$tmpfile"
+    fi
 
     # Preserve permissions (0600)
-    cp "$tmpfile" "$parcelrc_path"
+    cp "$tmpfile" "$parcelrc_path" || die "Failed to write parcelrc"
     chmod 0600 "$parcelrc_path"
 
     return 0
@@ -1467,10 +1491,10 @@ apply_parcelrc_customisations() {
         fi
     fi
 
-    # PASSWORD_STORE_DIR if non-default
+    # PASSWORD_STORE_DIR if non-default (overwrite — user explicitly chose a different path)
     if [ -n "$CUSTOM_PASSWORD_STORE_DIR" ] && [ "$CUSTOM_PASSWORD_STORE_DIR" != "$HOME/.password-store" ]; then
-        if set_parcelrc_var "$parcelrc" "PASSWORD_STORE_DIR" "$CUSTOM_PASSWORD_STORE_DIR"; then
-            log_success "Set PASSWORD_STORE_DIR in parcelrc"
+        if set_parcelrc_var "$parcelrc" "PASSWORD_STORE_DIR" "$CUSTOM_PASSWORD_STORE_DIR" force; then
+            log_success "Set PASSWORD_STORE_DIR=$CUSTOM_PASSWORD_STORE_DIR in parcelrc"
             APPLIED_PARCELRC_CHANGES="$APPLIED_PARCELRC_CHANGES PASSWORD_STORE_DIR"
         else
             log_info "PASSWORD_STORE_DIR already set in parcelrc — leaving as-is"
@@ -1879,7 +1903,7 @@ run_config_builder() {
         | if $fillRelated != true or has("fillRelated") then .fillRelated = $fillRelated else del(.fillRelated) end
         | if $disableContextPopup != false or has("disableContextPopup") then .disableContextPopup = $disableContextPopup else del(.disableContextPopup) end
         | if $passkeyDir != "passkeys" or has("passkeyDir") then .passkeyDir = $passkeyDir else del(.passkeyDir) end
-        | .rules = $rules
+        | if ($rules | length) > 0 then .rules = $rules else del(.rules) end
         ')"
 
     # Preview
