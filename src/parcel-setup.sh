@@ -269,6 +269,14 @@ manifest_key() {
     printf '%s-%s' "$os_key" "$RESOLVED_LEVEL"
 }
 
+# Escape regex metacharacters in a string for safe use in a pattern.
+# @param {string} str - Input string.
+# @returns {string} Escaped string on stdout.
+# @since 1.0.7
+escape_regex() {
+    printf '%s' "$1" | sed 's/[][.^$*+?{}\\|()]/\\&/g'
+}
+
 # ===========================================================================
 # Dev-mode fallback: load embedded data from source files
 # ===========================================================================
@@ -721,7 +729,7 @@ detect_flatpak_browsers() {
         else
             flatpak_list_cmd="flatpak"
         fi
-        if $flatpak_list_cmd list --columns=application 2>/dev/null | grep -q "^${app_id}$"; then
+        if $flatpak_list_cmd list --columns=application 2>/dev/null | grep -F -x -q "$app_id"; then
             if [ -n "$DETECTED_FLATPAK_BROWSERS" ]; then
                 DETECTED_FLATPAK_BROWSERS="$DETECTED_FLATPAK_BROWSERS$newline$app_id"
             else
@@ -1887,7 +1895,7 @@ run_config_builder() {
         basename_dir="${dir##*/}"
         # Skip dotfile dirs (basename starts with .)
         case "$basename_dir" in .*) continue ;; esac
-        rel_pattern="$(printf '%s' "$dir" | sed "s|$PASSWORD_STORE_DIR/||")"
+        rel_pattern="${dir#"$PASSWORD_STORE_DIR"/}"
 
         # Detect credential type from directory name
         local entry_class="login"
@@ -1898,8 +1906,10 @@ run_config_builder() {
         esac
 
         # Create a rule for this directory
+        local escaped_pattern
+        escaped_pattern="$(escape_regex "$rel_pattern")"
         rules_json="$(printf '%s' "$rules_json" | jq \
-            --arg pattern "^${rel_pattern}/" \
+            --arg pattern "^${escaped_pattern}/" \
             --arg class "$entry_class" \
             --arg tag "$basename_dir" \
             '. += [{pattern: $pattern, class: $class, tag: $tag, color: "333333"}]')"
@@ -1912,24 +1922,30 @@ run_config_builder() {
         basename_dir="${dir##*/}"
         # Skip dotfile dirs (basename starts with .)
         case "$basename_dir" in .*) continue ;; esac
-        rel_pattern="$(printf '%s' "$dir" | sed "s|$PASSWORD_STORE_DIR/||")"
+        rel_pattern="${dir#"$PASSWORD_STORE_DIR"/}"
 
         case "$basename_dir" in
             login|logins)
+                local escaped_pattern
+                escaped_pattern="$(escape_regex "$rel_pattern")"
                 rules_json="$(printf '%s' "$rules_json" | jq \
-                    --arg pattern "^${rel_pattern}/" \
+                    --arg pattern "^${escaped_pattern}/" \
                     --arg tag "$(printf '%s' "$rel_pattern" | cut -d/ -f1)" \
                     '. += [{pattern: $pattern, class: "login", tag: $tag, color: "333333"}]')"
                 ;;
             passkey|passkeys)
+                local escaped_pattern
+                escaped_pattern="$(escape_regex "$rel_pattern")"
                 rules_json="$(printf '%s' "$rules_json" | jq \
-                    --arg pattern "^${rel_pattern}/" \
+                    --arg pattern "^${escaped_pattern}/" \
                     --arg tag "$(printf '%s' "$rel_pattern" | cut -d/ -f1)" \
                     '. += [{pattern: $pattern, class: "passkey", tag: $tag, color: "333333"}]')"
                 ;;
             card|cards)
+                local escaped_pattern
+                escaped_pattern="$(escape_regex "$rel_pattern")"
                 rules_json="$(printf '%s' "$rules_json" | jq \
-                    --arg pattern "^${rel_pattern}/" \
+                    --arg pattern "^${escaped_pattern}/" \
                     --arg tag "$(printf '%s' "$rel_pattern" | cut -d/ -f1)" \
                     '. += [{pattern: $pattern, class: "card", tag: $tag, color: "333333"}]')"
                 ;;
