@@ -57,6 +57,7 @@ HAS_FLATPAK=false
 
 # Detected configuration (preserve PASSWORD_STORE_DIR if set in the environment)
 PASSWORD_STORE_DIR="${PASSWORD_STORE_DIR:-}"
+PASS_DIR_EXPLICIT=false
 CUSTOM_GPG=""
 CUSTOM_JQ=""
 FORCE_GPG=false
@@ -434,8 +435,12 @@ parse_args() {
                 shift
                 [ $# -gt 0 ] || die "--passdir requires an argument"
                 PASSWORD_STORE_DIR="$(expand_tilde "$1")"
+                PASS_DIR_EXPLICIT=true
                 ;;
-            --passdir=*) PASSWORD_STORE_DIR="$(expand_tilde "${1#*=}")" ;;
+            --passdir=*)
+                PASSWORD_STORE_DIR="$(expand_tilde "${1#*=}")"
+                PASS_DIR_EXPLICIT=true
+                ;;
             --help|-h)
                 print_usage
                 exit 0
@@ -747,10 +752,28 @@ detect_flatpak_browsers() {
 }
 
 # Detect the password store directory.
+# Sources, in priority order: an explicit --passdir flag, a value persisted by
+# a prior install in parcelrc, the PASSWORD_STORE_DIR environment variable,
+# ~/.password-store, then an interactive prompt. Uses $HOME, which main()
+# rewrites to the invoking user's home when running under sudo.
 # Sets PASSWORD_STORE_DIR and CUSTOM_PASSWORD_STORE_DIR (if non-default).
 # @since 1.0.7
 detect_password_store() {
     PASSWORD_STORE_DIR="${PASSWORD_STORE_DIR:-}"
+
+    # A prior installation persists PASSWORD_STORE_DIR in parcelrc; it ranks
+    # above the environment but below an explicit --passdir flag.
+    if ! $PASS_DIR_EXPLICIT; then
+        local parcelrc="$HOME/.config/parcel/parcelrc"
+        local rc_passdir=""
+        if [ -f "$parcelrc" ]; then
+            rc_passdir="$(sed -n 's/^PASSWORD_STORE_DIR="\(.*\)"$/\1/p' "$parcelrc" 2>/dev/null)"
+        fi
+        if [ -n "$rc_passdir" ]; then
+            PASSWORD_STORE_DIR="$(expand_tilde "$rc_passdir")"
+        fi
+    fi
+
     if [ -n "${PASSWORD_STORE_DIR:-}" ]; then
         :
     elif [ -d "$HOME/.password-store" ]; then
@@ -2176,6 +2199,12 @@ main() {
             ;;
         uninstall)
             resolve_prefix
+            # Resolve PASSWORD_STORE_DIR only when it is needed, so a plain
+            # --uninstall does not prompt for a store directory.
+            if $REMOVE_CONFIG; then
+                detect_password_store
+            fi
+            preview_uninstall
             do_uninstall
             ;;
         config)
