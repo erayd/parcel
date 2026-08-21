@@ -68,6 +68,7 @@ WANTS_HOST_HASH=false
 HOST_NAME=""
 EXT_ID_CHROMIUM=""
 EXT_ID_FIREFOX=""
+FLATPAK_WRAPPER_DIR_TEMPLATE=""
 
 # Tracking
 PHASE="init"
@@ -323,6 +324,15 @@ config_query() {
 # @since 1.0.7
 get_browser_config() {
     config_query ".browsers[] | select(.name == \"$1\")"
+}
+
+# Expand the flatpak wrapper dir template for a given app ID.
+# @param {string} app_id - Flatpak application ID.
+# @returns {string} Expanded wrapper directory path on stdout.
+# @since 1.0.7
+flatpak_wrapper_dir() {
+    local app_id="$1"
+    expand_tilde "${FLATPAK_WRAPPER_DIR_TEMPLATE/\{appId\}/$app_id}"
 }
 
 # Get the value of a field from a browser definition.
@@ -990,7 +1000,7 @@ preview_install() {
             local app_id
             for app_id in $DETECTED_FLATPAK_BROWSERS; do
                 local wrapper_dir
-                wrapper_dir="$(expand_tilde "$HOME/.var/app/$app_id/config/parcel")"
+                wrapper_dir="$(flatpak_wrapper_dir "$app_id")"
                 log_info "    $app_id: $wrapper_dir/parcel-flatpak-wrapper.sh"
             done
             log_info "  Apply flatpak overrides:"
@@ -1107,7 +1117,7 @@ preview_uninstall() {
         while [ "$i" -lt "$fp_count" ]; do
             local app_id wrapper_dir
             app_id="$(config_query ".flatpak.browsers[$i].appId")"
-            wrapper_dir="$(expand_tilde "$HOME/.var/app/$app_id/config/parcel")"
+            wrapper_dir="$(flatpak_wrapper_dir "$app_id")"
             if [ -f "$wrapper_dir/parcel-flatpak-wrapper.sh" ]; then
                 log_info "  $wrapper_dir/parcel-flatpak-wrapper.sh"
             fi
@@ -1301,7 +1311,7 @@ install_flatpak_wrappers() {
     local app_id
     for app_id in $DETECTED_FLATPAK_BROWSERS; do
         local wrapper_dir wrapper_path manifest_dir
-        wrapper_dir="$(expand_tilde "$HOME/.var/app/$app_id/config/parcel")"
+        wrapper_dir="$(flatpak_wrapper_dir "$app_id")"
         wrapper_path="$wrapper_dir/parcel-flatpak-wrapper.sh"
 
         # Create wrapper directory
@@ -1752,7 +1762,7 @@ do_uninstall() {
         while [ "$i" -lt "$fp_count" ]; do
             local app_id wrapper_dir
             app_id="$(config_query ".flatpak.browsers[$i].appId")"
-            wrapper_dir="$(expand_tilde "$HOME/.var/app/$app_id/config/parcel")"
+            wrapper_dir="$(flatpak_wrapper_dir "$app_id")"
             if [ -f "$wrapper_dir/parcel-flatpak-wrapper.sh" ]; then
                 rm -f "$wrapper_dir/parcel-flatpak-wrapper.sh"
                 rmdir "$wrapper_dir" 2>/dev/null || true
@@ -2084,6 +2094,7 @@ main() {
     HOST_NAME="$(config_query '.hostName')"
     EXT_ID_CHROMIUM="$(config_query '.extensionIds.chromium')"
     EXT_ID_FIREFOX="$(config_query '.extensionIds.firefox')"
+    FLATPAK_WRAPPER_DIR_TEMPLATE="$(config_query '.flatpak.wrapperDirTemplate')"
 
     case "$ACTION" in
         install)
