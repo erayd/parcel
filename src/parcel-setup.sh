@@ -55,8 +55,8 @@ DETECTED_BROWSERS=""
 DETECTED_FLATPAK_BROWSERS=""
 HAS_FLATPAK=false
 
-# Detected configuration
-PASSWORD_STORE_DIR=""
+# Detected configuration (preserve PASSWORD_STORE_DIR if set in the environment)
+PASSWORD_STORE_DIR="${PASSWORD_STORE_DIR:-}"
 CUSTOM_GPG=""
 CUSTOM_JQ=""
 CUSTOM_PASSWORD_STORE_DIR=""
@@ -396,6 +396,8 @@ parse_args() {
             --remove-config) REMOVE_CONFIG=true ;;
             --flatpak-only) FLATPAK_ONLY=true ;;
             --verbose) VERBOSE=true ;;
+            --passdir) shift; PASSWORD_STORE_DIR="$(expand_tilde "$1")" ;;
+            --passdir=*) PASSWORD_STORE_DIR="$(expand_tilde "${1#*=}")" ;;
             --help|-h)
                 print_usage
                 exit 0
@@ -429,6 +431,7 @@ Install options:
   --system            Install system-wide (requires sudo, will prompt if omitted)
   --user              Install user-level (no sudo needed, no prompt if omitted)
   --prefix <path>     Custom installation prefix
+  --passdir <path>    Custom password store directory (overrides PASSWORD_STORE_DIR)
   --browser <name>    Set up only the specified browser(s) (comma or space separated)
   --flatpak-only      Only handle flatpak browsers (skip native)
   --yes, -y           Non-interactive: accept all detected defaults
@@ -674,14 +677,12 @@ detect_flatpak_browsers() {
 }
 
 # Detect the password store directory.
-# Sets PASSWORD_STORE_DIR.
+# Sets PASSWORD_STORE_DIR and CUSTOM_PASSWORD_STORE_DIR (if non-default).
 # @since 1.0.7
 detect_password_store() {
     PASSWORD_STORE_DIR="${PASSWORD_STORE_DIR:-}"
     if [ -n "${PASSWORD_STORE_DIR:-}" ]; then
         :
-    elif [ -n "${PASSWORD_STORE_DIR_ENV:-}" ]; then
-        PASSWORD_STORE_DIR="$PASSWORD_STORE_DIR_ENV"
     elif [ -d "$HOME/.password-store" ]; then
         PASSWORD_STORE_DIR="$HOME/.password-store"
     else
@@ -689,6 +690,11 @@ detect_password_store() {
         local default_dir="$HOME/.password-store"
         PASSWORD_STORE_DIR="$(prompt "Password store directory" "$default_dir")"
         PASSWORD_STORE_DIR="$(expand_tilde "$PASSWORD_STORE_DIR")"
+    fi
+
+    # Track non-default locations for parcelrc persistence
+    if [ -n "$PASSWORD_STORE_DIR" ] && [ "$PASSWORD_STORE_DIR" != "$HOME/.password-store" ]; then
+        CUSTOM_PASSWORD_STORE_DIR="$PASSWORD_STORE_DIR"
     fi
 
     if [ ! -d "$PASSWORD_STORE_DIR" ]; then
@@ -920,6 +926,7 @@ preview_install() {
         [ -n "$CUSTOM_GPG" ] && rc_changes="$rc_changes GPG=$CUSTOM_GPG"
         [ -n "$CUSTOM_JQ" ] && rc_changes="$rc_changes JQ=$CUSTOM_JQ"
         $WANTS_HOST_HASH && rc_changes="$rc_changes HOST_HASH=$SIGNED_HOST_SHA256"
+        [ -n "$CUSTOM_PASSWORD_STORE_DIR" ] && rc_changes="$rc_changes PASSWORD_STORE_DIR=$CUSTOM_PASSWORD_STORE_DIR"
         if [ -n "$rc_changes" ]; then
             log_info "  Apply parcelrc customisations (stricter-only):"
             for change in $rc_changes; do

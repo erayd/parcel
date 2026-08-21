@@ -151,6 +151,7 @@ After the setup script completes, install the Parcel extension from your browser
 | `--system` | Install system-wide (requires `sudo`). |
 | `--user` | Install user-level (no `sudo` needed). |
 | `--prefix <path>` | Custom installation prefix. |
+| `--passdir <path>` | Custom password store directory (overrides `PASSWORD_STORE_DIR`). |
 | `--browser <name>` | Set up only the specified browser(s) (comma or space separated). |
 | `--flatpak-only` | Only handle Flatpak browsers (skip native). |
 | `--yes`, `-y` | Non-interactive: accept all detected defaults. |
