@@ -816,7 +816,8 @@ detect_single_tool_path() {
     found_path="$(command -v "$tool" 2>/dev/null || echo "")"
 
     # macOS fallback: common Homebrew locations may not be in the shell's PATH
-    if [ -z "$found_path" ] || [ "$OS" = "darwin" ]; then
+    # (e.g. when running under sudo with a sanitised PATH)
+    if [ -z "$found_path" ]; then
         local candidate
         for candidate in "/opt/homebrew/bin/$tool" "/usr/local/bin/$tool"; do
             if [ -x "$candidate" ]; then
