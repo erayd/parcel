@@ -205,7 +205,10 @@ prompt() {
     else
         printf '%s: ' "$prompt_msg" >&2
     fi
-    read -r response </dev/tty
+    read -r response </dev/tty || {
+        log_error "No TTY available - non-interactive setup requires --yes"
+        exit 1
+    }
     printf '%s' "${response:-$default_val}"
 }
 
@@ -228,7 +231,10 @@ prompt_yesno() {
     fi
     local response
     printf '%s [%s]: ' "$prompt_msg" "$hint" >&2
-    read -r response </dev/tty
+    read -r response </dev/tty || {
+        log_error "No TTY available - non-interactive setup requires --yes"
+        exit 1
+    }
     response="$(printf '%s' "$response" | tr '[:upper:]' '[:lower:]')"
     case "$response" in
         y|yes) return 0 ;;
