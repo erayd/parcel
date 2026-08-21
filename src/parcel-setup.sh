@@ -1968,6 +1968,9 @@ run_config_builder() {
         if [ "$(printf '%s' "$config_json" | jq '.rules | length')" -gt 0 ]; then
             rules_json="$(printf '%s' "$config_json" | jq '.rules')"
         fi
+    elif [ "$rule_count" -eq 0 ]; then
+        # No suggestions detected - keep existing rules if any
+        rules_json="$(printf '%s' "$config_json" | jq '.rules // []')"
     fi
 
     # Ask about non-rule settings
