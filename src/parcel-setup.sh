@@ -531,7 +531,7 @@ check_dependencies() {
     # sha256 is needed by the bootstrap host; check for it here so we can
     # give a better error message, but it is not fatal for the setup script.
     if ! command_exists sha256sum && ! command_exists sha256; then
-        log_warn "Neither sha256sum nor sha256 found — the bootstrap host may not function correctly"
+        log_warn "Neither sha256sum nor sha256 found - the bootstrap host may not function correctly"
     fi
 
     if [ -n "$missing" ]; then
@@ -788,13 +788,13 @@ detect_single_tool_path() {
     local custom_var="$4" force_var="$5"
     local found_path
 
-    # 1. Existing parcelrc value — respect it if the binary is still executable
+    # 1. Existing parcelrc value - respect it if the binary is still executable
     if [ -n "$existing" ]; then
         if [ -x "$existing" ]; then
-            log_info "$tool already set in parcelrc ($existing) — leaving as-is"
+            log_info "$tool already set in parcelrc ($existing) - leaving as-is"
             return
         fi
-        log_warn "$tool in parcelrc ($existing) is not executable — will overwrite"
+        log_warn "$tool in parcelrc ($existing) is not executable - will overwrite"
     fi
 
     # 2. Default path visible to the host (no customisation needed)
@@ -910,7 +910,7 @@ run_detect() {
 
 # Ask the user whether to pin HOST_HASH in their parcelrc.
 # If HOST_HASH is already set, no prompt is offered. In --yes mode, the
-# hash is not applied — pinning is an opt-in security decision.
+# hash is not applied - pinning is an opt-in security decision.
 # @since 1.0.7
 offer_host_hash() {
     if [ -z "$SIGNED_HOST_SHA256" ]; then
@@ -921,7 +921,7 @@ offer_host_hash() {
     local parcelrc
     parcelrc="$HOME/.config/parcel/parcelrc"
     if [ -f "$parcelrc" ] && grep -q '^HOST_HASH=' "$parcelrc" 2>/dev/null; then
-        log_info "HOST_HASH already set in parcelrc — leaving as-is"
+        log_info "HOST_HASH already set in parcelrc - leaving as-is"
         return
     fi
 
@@ -1228,7 +1228,7 @@ install_native_manifests() {
         manifest_dir="$(browser_field "$browser_json" ".manifestDir[\"$key\"]?")"
 
         if [ -z "$manifest_dir" ]; then
-            log_warn "No manifest directory for $name on $OS — skipping"
+            log_warn "No manifest directory for $name on $OS - skipping"
             INSTALL_ERRORS=$((INSTALL_ERRORS + 1))
             continue
         fi
@@ -1396,7 +1396,7 @@ get_user_home() {
 }
 
 # Run the bootstrap host as the correct user.
-# Stdout is discarded — the native messaging protocol output is not needed
+# Stdout is discarded - the native messaging protocol output is not needed
 # during the smoke test, and leaking it to the terminal is confusing.
 # @param {string} host_bin - Path to the bootstrap host binary.
 # @returns {number} Exit code of the host.
@@ -1537,7 +1537,7 @@ apply_parcelrc_customisations() {
     parcelrc="$HOME/.config/parcel/parcelrc"
 
     if [ ! -f "$parcelrc" ]; then
-        log_warn "parcelrc not found at $parcelrc — skipping customisations"
+        log_warn "parcelrc not found at $parcelrc - skipping customisations"
         return
     fi
 
@@ -1556,7 +1556,7 @@ apply_parcelrc_customisations() {
             log_success "Set GPG=$CUSTOM_GPG in parcelrc"
             APPLIED_PARCELRC_CHANGES="$APPLIED_PARCELRC_CHANGES GPG"
         else
-            log_info "GPG already set in parcelrc — leaving as-is"
+            log_info "GPG already set in parcelrc - leaving as-is"
         fi
     fi
 
@@ -1568,17 +1568,17 @@ apply_parcelrc_customisations() {
             log_success "Set JQ=$CUSTOM_JQ in parcelrc"
             APPLIED_PARCELRC_CHANGES="$APPLIED_PARCELRC_CHANGES JQ"
         else
-            log_info "JQ already set in parcelrc — leaving as-is"
+            log_info "JQ already set in parcelrc - leaving as-is"
         fi
     fi
 
-    # PASSWORD_STORE_DIR if non-default (overwrite — user explicitly chose a different path)
+    # PASSWORD_STORE_DIR if non-default (overwrite - user explicitly chose a different path)
     if [ -n "$CUSTOM_PASSWORD_STORE_DIR" ] && [ "$CUSTOM_PASSWORD_STORE_DIR" != "$HOME/.password-store" ]; then
         if set_parcelrc_var "$parcelrc" "PASSWORD_STORE_DIR" "$CUSTOM_PASSWORD_STORE_DIR" force; then
             log_success "Set PASSWORD_STORE_DIR=$CUSTOM_PASSWORD_STORE_DIR in parcelrc"
             APPLIED_PARCELRC_CHANGES="$APPLIED_PARCELRC_CHANGES PASSWORD_STORE_DIR"
         else
-            log_info "PASSWORD_STORE_DIR already set in parcelrc — leaving as-is"
+            log_info "PASSWORD_STORE_DIR already set in parcelrc - leaving as-is"
         fi
     fi
 }
@@ -1591,7 +1591,7 @@ apply_host_hash() {
     parcelrc="$HOME/.config/parcel/parcelrc"
 
     if [ ! -f "$parcelrc" ]; then
-        log_warn "parcelrc not found at $parcelrc — skipping HOST_HASH"
+        log_warn "parcelrc not found at $parcelrc - skipping HOST_HASH"
         return
     fi
 
@@ -1600,7 +1600,7 @@ apply_host_hash() {
             log_success "Set HOST_HASH in parcelrc (pins signed host for review)"
             APPLIED_PARCELRC_CHANGES="$APPLIED_PARCELRC_CHANGES HOST_HASH"
         else
-            log_info "HOST_HASH already set in parcelrc — leaving as-is"
+            log_info "HOST_HASH already set in parcelrc - leaving as-is"
         fi
     fi
 }
@@ -1654,7 +1654,7 @@ summary_report() {
                 run_config_builder
             fi
         else
-            log_info "Password store not found — skipping config builder offer"
+            log_info "Password store not found - skipping config builder offer"
         fi
     fi
 
@@ -1684,13 +1684,13 @@ apply_install() {
     # First smoke test (creates parcelrc)
     first_smoke_test
 
-    # Apply tool paths and password store — before second smoke test so they're verified
+    # Apply tool paths and password store - before second smoke test so they're verified
     apply_parcelrc_customisations
 
     # Second smoke test (verification)
     second_smoke_test
 
-    # Apply HOST_HASH — after verification passes (pinning only, doesn't affect functionality)
+    # Apply HOST_HASH - after verification passes (pinning only, doesn't affect functionality)
     apply_host_hash
 
     summary_report
@@ -1783,7 +1783,7 @@ do_uninstall() {
     log_info "Note: log file ($HOME/.local/log/parcel-host.log) is preserved"
 
     if [ -z "$removed" ]; then
-        log_info "Nothing to remove — Parcel does not appear to be installed"
+        log_info "Nothing to remove - Parcel does not appear to be installed"
     fi
 
     exit 0
@@ -2051,7 +2051,7 @@ on_signal() {
     printf '\n' >&2
     log_warn "Interrupted during $PHASE phase"
     if [ "${PHASE#apply}" != "$PHASE" ]; then
-        log_warn "Partial changes may exist — check what was completed"
+        log_warn "Partial changes may exist - check what was completed"
     fi
     cleanup
     exit 3
