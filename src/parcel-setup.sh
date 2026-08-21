@@ -1275,7 +1275,7 @@ install_native_manifests() {
 
         # Create the manifest directory
         if [ ! -d "$manifest_dir" ]; then
-            if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
+            if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ] && [ "$RESOLVED_LEVEL" = "user" ]; then
                 mkdir -p "$manifest_dir"
                 chown "$SERVICES_USER" "$manifest_dir" 2>/dev/null || true
             else
@@ -1302,7 +1302,7 @@ install_native_manifests() {
             APPLIED_CHANGES="$APPLIED_CHANGES manifest-$name"
 
             # Fix ownership if running as root
-            if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
+            if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ] && [ "$RESOLVED_LEVEL" = "user" ]; then
                 chown "$SERVICES_USER" "$manifest_path" 2>/dev/null || true
             fi
         else
