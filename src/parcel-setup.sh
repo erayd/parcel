@@ -60,6 +60,8 @@ HAS_FLATPAK=false
 PASSWORD_STORE_DIR="${PASSWORD_STORE_DIR:-}"
 CUSTOM_GPG=""
 CUSTOM_JQ=""
+FORCE_GPG=false
+FORCE_JQ=false
 CUSTOM_PASSWORD_STORE_DIR=""
 WANTS_HOST_HASH=false
 
@@ -757,58 +759,77 @@ detect_password_store() {
     fi
 }
 
-# Detect gpg and jq paths, prompting for customisations on macOS.
-# Sets CUSTOM_GPG and CUSTOM_JQ.
+# Detect gpg and jq paths.
+# Priority: existing parcelrc value (if working) > default path > command -v > macOS fallbacks.
+# If a parcelrc value is set but broken, it is clobbered (FORCE_GPG/FORCE_JQ).
+# Sets CUSTOM_GPG, CUSTOM_JQ, FORCE_GPG, FORCE_JQ.
 # @since 1.0.7
 detect_tool_paths() {
-    local gpg_path jq_path
+    local parcelrc="$HOME/.config/parcel/parcelrc"
+    local existing_gpg="" existing_jq=""
 
-    gpg_path="$(command -v gpg 2>/dev/null || echo "")"
-    jq_path="$(command -v jq 2>/dev/null || echo "")"
-
-    # On macOS, gpg/jq may be in /opt/homebrew/bin or /usr/local/bin
-    # but not in the default PATH that the bootstrap host sees
-    if [ "$OS" = "darwin" ]; then
-        # Check if gpg is outside the default PATH
-        if [ -x "/opt/homebrew/bin/gpg" ] && [ "$gpg_path" != "/opt/homebrew/bin/gpg" ]; then
-            gpg_path="/opt/homebrew/bin/gpg"
-        elif [ -x "/usr/local/bin/gpg" ] && [ "$gpg_path" != "/usr/local/bin/gpg" ]; then
-            gpg_path="/usr/local/bin/gpg"
-        fi
-        if [ -x "/opt/homebrew/bin/jq" ] && [ "$jq_path" != "/opt/homebrew/bin/jq" ]; then
-            jq_path="/opt/homebrew/bin/jq"
-        elif [ -x "/usr/local/bin/jq" ] && [ "$jq_path" != "/usr/local/bin/jq" ]; then
-            jq_path="/usr/local/bin/jq"
-        fi
+    # Read existing parcelrc values if the file exists
+    if [ -f "$parcelrc" ]; then
+        existing_gpg="$(sed -n 's/^GPG="\(.*\)"$/\1/p' "$parcelrc" 2>/dev/null)"
+        existing_jq="$(sed -n 's/^JQ="\(.*\)"$/\1/p' "$parcelrc" 2>/dev/null)"
     fi
 
-    # Determine if custom paths are needed (not in default PATH)
-    local default_path_gpg default_path_jq
-    default_path_gpg="/usr/bin/gpg"
-    default_path_jq="/usr/bin/jq"
+    detect_single_tool_path "gpg" "$existing_gpg" "/usr/bin/gpg" CUSTOM_GPG FORCE_GPG
+    detect_single_tool_path "jq" "$existing_jq" "/usr/bin/jq" CUSTOM_JQ FORCE_JQ
+}
 
-    if [ "$gpg_path" != "$default_path_gpg" ] && [ -n "$gpg_path" ]; then
-        CUSTOM_GPG="$gpg_path"
-    fi
-    if [ "$jq_path" != "$default_path_jq" ] && [ -n "$jq_path" ]; then
-        CUSTOM_JQ="$jq_path"
+# Detect a single tool's path.
+# Checks parcelrc value first, then default path, then command -v + macOS fallbacks.
+# @param {string} tool - Tool name (e.g. gpg, jq).
+# @param {string} existing - Existing parcelrc value (may be empty).
+# @param {string} default_path - Default system path (e.g. /usr/bin/gpg).
+# @param {string} custom_var - Name of the global to set with the custom path.
+# @param {string} force_var - Name of the global to set true if clobbering.
+# @since 1.0.7
+detect_single_tool_path() {
+    local tool="$1" existing="$2" default_path="$3"
+    local custom_var="$4" force_var="$5"
+    local found_path
+
+    # 1. Existing parcelrc value — respect it if the binary is still executable
+    if [ -n "$existing" ]; then
+        if [ -x "$existing" ]; then
+            log_info "$tool already set in parcelrc ($existing) — leaving as-is"
+            return
+        fi
+        log_warn "$tool in parcelrc ($existing) is not executable — will overwrite"
     fi
 
-    # Interactive prompt for custom paths
-    if ! $YES; then
-        local response
-        response="$(prompt "GPG binary path" "${gpg_path:-gpg}")"
-        if [ "$response" != "gpg" ] && [ "$response" != "${gpg_path:-}" ]; then
-            CUSTOM_GPG="$response"
-        elif [ -n "$CUSTOM_GPG" ] && [ "$response" = "${gpg_path:-}" ]; then
-            : # keep the detected custom path
+    # 2. Default path visible to the host (no customisation needed)
+    if [ -z "$existing" ] && [ -x "$default_path" ]; then
+        return
+    fi
+
+    # 3. Fall back to command -v, then macOS-specific locations
+    found_path="$(command -v "$tool" 2>/dev/null || echo "")"
+
+    # macOS fallback: common Homebrew locations may not be in the shell's PATH
+    if [ -z "$found_path" ] || [ "$OS" = "darwin" ]; then
+        local candidate
+        for candidate in "/opt/homebrew/bin/$tool" "/usr/local/bin/$tool"; do
+            if [ -x "$candidate" ]; then
+                found_path="$candidate"
+                break
+            fi
+        done
+    fi
+
+    if [ -z "$found_path" ]; then
+        if [ -n "$existing" ]; then
+            log_error "No working $tool found to replace broken parcelrc entry ($existing)"
         fi
-        response="$(prompt "jq binary path" "${jq_path:-jq}")"
-        if [ "$response" != "jq" ] && [ "$response" != "${jq_path:-}" ]; then
-            CUSTOM_JQ="$response"
-        elif [ -n "$CUSTOM_JQ" ] && [ "$response" = "${jq_path:-}" ]; then
-            : # keep the detected custom path
-        fi
+        return
+    fi
+
+    # Set the custom path; force if we're replacing a broken existing value
+    printf -v "$custom_var" '%s' "$found_path"
+    if [ -n "$existing" ]; then
+        printf -v "$force_var" '%s' true
     fi
 }
 
@@ -982,10 +1003,22 @@ preview_install() {
             printf '\n' >&2
         fi
 
-        # parcrelrc customisations
+        # parcelrc customisations
         local rc_changes=""
-        [ -n "$CUSTOM_GPG" ] && rc_changes="${rc_changes}GPG=$CUSTOM_GPG$newline"
-        [ -n "$CUSTOM_JQ" ] && rc_changes="${rc_changes}JQ=$CUSTOM_JQ$newline"
+        if [ -n "$CUSTOM_GPG" ]; then
+            if $FORCE_GPG; then
+                rc_changes="${rc_changes}GPG=$CUSTOM_GPG (overwrite)$newline"
+            else
+                rc_changes="${rc_changes}GPG=$CUSTOM_GPG$newline"
+            fi
+        fi
+        if [ -n "$CUSTOM_JQ" ]; then
+            if $FORCE_JQ; then
+                rc_changes="${rc_changes}JQ=$CUSTOM_JQ (overwrite)$newline"
+            else
+                rc_changes="${rc_changes}JQ=$CUSTOM_JQ$newline"
+            fi
+        fi
         $WANTS_HOST_HASH && rc_changes="${rc_changes}HOST_HASH=$SIGNED_HOST_SHA256$newline"
         if [ -n "$CUSTOM_PASSWORD_STORE_DIR" ]; then
             local parcelrc_check existing_passdir
@@ -1501,9 +1534,10 @@ set_parcelrc_var() {
 # The list of parcelrc changes applied (for revert tracking).
 APPLIED_PARCELRC_CHANGES=""
 
-# Apply parcelrc customisations (stricter-only, user-chosen paths).
-# HOST_HASH is only applied if the user opted in via offer_host_hash().
-# If a variable is already set in parcelrc, it is never overwritten.
+# Apply parcelrc customisations for tool paths and password store.
+# Applied before the second smoke test so they are included in verification.
+# GPG/JQ are only overwritten if the existing value was broken (FORCE_GPG/FORCE_JQ).
+# PASSWORD_STORE_DIR always uses force mode (user explicitly chose a different path).
 # @since 1.0.7
 apply_parcelrc_customisations() {
     local parcelrc
@@ -1523,7 +1557,9 @@ apply_parcelrc_customisations() {
 
     # GPG path
     if [ -n "$CUSTOM_GPG" ]; then
-        if set_parcelrc_var "$parcelrc" "GPG" "$CUSTOM_GPG"; then
+        local gpg_force=""
+        $FORCE_GPG && gpg_force="force"
+        if set_parcelrc_var "$parcelrc" "GPG" "$CUSTOM_GPG" "$gpg_force"; then
             log_success "Set GPG=$CUSTOM_GPG in parcelrc"
             APPLIED_PARCELRC_CHANGES="$APPLIED_PARCELRC_CHANGES GPG"
         else
@@ -1533,21 +1569,13 @@ apply_parcelrc_customisations() {
 
     # JQ path
     if [ -n "$CUSTOM_JQ" ]; then
-        if set_parcelrc_var "$parcelrc" "JQ" "$CUSTOM_JQ"; then
+        local jq_force=""
+        $FORCE_JQ && jq_force="force"
+        if set_parcelrc_var "$parcelrc" "JQ" "$CUSTOM_JQ" "$jq_force"; then
             log_success "Set JQ=$CUSTOM_JQ in parcelrc"
             APPLIED_PARCELRC_CHANGES="$APPLIED_PARCELRC_CHANGES JQ"
         else
             log_info "JQ already set in parcelrc — leaving as-is"
-        fi
-    fi
-
-    # HOST_HASH (opt-in, applied after second smoke test)
-    if $WANTS_HOST_HASH && [ -n "$SIGNED_HOST_SHA256" ]; then
-        if set_parcelrc_var "$parcelrc" "HOST_HASH" "$SIGNED_HOST_SHA256"; then
-            log_success "Set HOST_HASH in parcelrc (pins signed host for review)"
-            APPLIED_PARCELRC_CHANGES="$APPLIED_PARCELRC_CHANGES HOST_HASH"
-        else
-            log_info "HOST_HASH already set in parcelrc — leaving as-is"
         fi
     fi
 
@@ -1558,6 +1586,28 @@ apply_parcelrc_customisations() {
             APPLIED_PARCELRC_CHANGES="$APPLIED_PARCELRC_CHANGES PASSWORD_STORE_DIR"
         else
             log_info "PASSWORD_STORE_DIR already set in parcelrc — leaving as-is"
+        fi
+    fi
+}
+
+# Apply HOST_HASH to parcelrc after the second smoke test passes.
+# Only applied if the user opted in via offer_host_hash().
+# @since 1.0.7
+apply_host_hash() {
+    local parcelrc
+    parcelrc="$HOME/.config/parcel/parcelrc"
+
+    if [ ! -f "$parcelrc" ]; then
+        log_warn "parcelrc not found at $parcelrc — skipping HOST_HASH"
+        return
+    fi
+
+    if $WANTS_HOST_HASH && [ -n "$SIGNED_HOST_SHA256" ]; then
+        if set_parcelrc_var "$parcelrc" "HOST_HASH" "$SIGNED_HOST_SHA256"; then
+            log_success "Set HOST_HASH in parcelrc (pins signed host for review)"
+            APPLIED_PARCELRC_CHANGES="$APPLIED_PARCELRC_CHANGES HOST_HASH"
+        else
+            log_info "HOST_HASH already set in parcelrc — leaving as-is"
         fi
     fi
 }
@@ -1641,14 +1691,14 @@ apply_install() {
     # First smoke test (creates parcelrc)
     first_smoke_test
 
-    # Apply user-chosen paths (gpg/jq) — before second smoke test
+    # Apply tool paths and password store — before second smoke test so they're verified
     apply_parcelrc_customisations
 
     # Second smoke test (verification)
     second_smoke_test
 
-    # Apply remaining customisations (HOST_HASH if opted in) — after verification
-    apply_parcelrc_customisations
+    # Apply HOST_HASH — after verification passes (pinning only, doesn't affect functionality)
+    apply_host_hash
 
     summary_report
 }
