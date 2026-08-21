@@ -857,9 +857,8 @@ offer_host_hash() {
     fi
 
     # Check if HOST_HASH is already set in the parcelrc
-    local user_home parcelrc
-    user_home="$(get_user_home)"
-    parcelrc="$user_home/.config/parcel/parcelrc"
+    local parcelrc
+    parcelrc="$HOME/.config/parcel/parcelrc"
     if [ -f "$parcelrc" ] && grep -q '^HOST_HASH=' "$parcelrc" 2>/dev/null; then
         log_info "HOST_HASH already set in parcelrc — leaving as-is"
         return
@@ -946,9 +945,8 @@ preview_install() {
         [ -n "$CUSTOM_JQ" ] && rc_changes="${rc_changes}JQ=$CUSTOM_JQ$newline"
         $WANTS_HOST_HASH && rc_changes="${rc_changes}HOST_HASH=$SIGNED_HOST_SHA256$newline"
         if [ -n "$CUSTOM_PASSWORD_STORE_DIR" ]; then
-            local user_home parcelrc_check existing_passdir
-            user_home="$(get_user_home)"
-            parcelrc_check="$user_home/.config/parcel/parcelrc"
+            local parcelrc_check existing_passdir
+            parcelrc_check="$HOME/.config/parcel/parcelrc"
             existing_passdir=""
             if [ -f "$parcelrc_check" ]; then
                 existing_passdir="$(sed -n 's/^PASSWORD_STORE_DIR="\(.*\)"$/\1/p' "$parcelrc_check" 2>/dev/null)"
@@ -969,9 +967,8 @@ preview_install() {
             printf '\n' >&2
         fi
 
-        local user_home parcelrc
-        user_home="$(get_user_home)"
-        parcelrc="$user_home/.config/parcel/parcelrc"
+        local parcelrc
+        parcelrc="$HOME/.config/parcel/parcelrc"
         if [ -f "$parcelrc" ]; then
             log_info "  Smoke test will verify the existing parcelrc"
         else
@@ -1234,6 +1231,11 @@ install_flatpak_wrappers() {
             continue
         }
 
+        # Fix ownership if running as root
+        if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
+            chown -R "$SERVICES_USER" "$wrapper_dir" 2>/dev/null || true
+        fi
+
         # Generate and install wrapper
         generate_flatpak_wrapper "$HOST_BIN_PATH" > "$wrapper_path"
         chmod 0755 "$wrapper_path"
@@ -1299,7 +1301,7 @@ install_flatpak_wrappers() {
 get_user_home() {
     if [ -n "$SERVICES_USER" ]; then
         if [ "$OS" = "darwin" ]; then
-            eval echo "~$SERVICES_USER" 2>/dev/null || echo "$HOME"
+            dscl . -read "/Users/$SERVICES_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || echo "$HOME"
         else
             getent passwd "$SERVICES_USER" 2>/dev/null | cut -d: -f6 || echo "$HOME"
         fi
@@ -1316,11 +1318,9 @@ get_user_home() {
 # @since 1.0.7
 run_host_as_user() {
     local host_bin="$1"
-    local user_home
-    user_home="$(get_user_home)"
 
     if [ -n "$SERVICES_USER" ]; then
-        printf '' | sudo -u "$SERVICES_USER" env "HOME=$user_home" "$host_bin" >/dev/null 2>/dev/null
+        printf '' | sudo -u "$SERVICES_USER" env "HOME=$HOME" "$host_bin" >/dev/null 2>/dev/null
         return $?
     else
         printf '' | "$host_bin" >/dev/null 2>/dev/null
@@ -1338,9 +1338,8 @@ first_smoke_test() {
     run_host_as_user "$HOST_BIN_PATH"
     local rc=$?
 
-    local user_home parcelrc
-    user_home="$(get_user_home)"
-    parcelrc="$user_home/.config/parcel/parcelrc"
+    local parcelrc
+    parcelrc="$HOME/.config/parcel/parcelrc"
 
     if [ $rc -ne 0 ] && [ ! -f "$parcelrc" ]; then
         log_error "First smoke test failed and parcelrc was not created"
@@ -1380,11 +1379,9 @@ second_smoke_test() {
         # Revert: remove any lines we added. Since we track what we changed,
         # we can remove those specific lines. For now, report the issue.
         # A full revert would require backup/restore of the parcelrc.
-        local user_home
-        user_home="$(get_user_home)"
-        local parcelrc="$user_home/.config/parcel/parcelrc"
+        local parcelrc="$HOME/.config/parcel/parcelrc"
         log_error "Check the parcel-host log for details:"
-        log_error "  $user_home/.local/log/parcel-host.log"
+        log_error "  $HOME/.local/log/parcel-host.log"
         die "Smoke test verification failed"
     fi
 
@@ -1453,9 +1450,8 @@ APPLIED_PARCELRC_CHANGES=""
 # If a variable is already set in parcelrc, it is never overwritten.
 # @since 1.0.7
 apply_parcelrc_customisations() {
-    local user_home parcelrc
-    user_home="$(get_user_home)"
-    parcelrc="$user_home/.config/parcel/parcelrc"
+    local parcelrc
+    parcelrc="$HOME/.config/parcel/parcelrc"
 
     if [ ! -f "$parcelrc" ]; then
         log_warn "parcelrc not found at $parcelrc — skipping customisations"
@@ -1519,9 +1515,6 @@ apply_parcelrc_customisations() {
 summary_report() {
     log_section "Summary"
 
-    local user_home
-    user_home="$(get_user_home)"
-
     for change in $APPLIED_CHANGES; do
         case "$change" in
             bootstrap-host) log_success "Bootstrap host installed: $HOST_BIN_PATH" ;;
@@ -1539,8 +1532,8 @@ summary_report() {
     fi
 
     printf '\n' >&2
-    log_info "parcelrc: $user_home/.config/parcel/parcelrc"
-    log_info "Log file: $user_home/.local/log/parcel-host.log"
+    log_info "parcelrc: $HOME/.config/parcel/parcelrc"
+    log_info "Log file: $HOME/.local/log/parcel-host.log"
     printf '\n' >&2
 
     # Offer config builder
@@ -1677,7 +1670,7 @@ do_uninstall() {
     fi
 
     # Note about log file
-    log_info "Note: log file (~/.local/log/parcel-host.log) is preserved"
+    log_info "Note: log file ($HOME/.local/log/parcel-host.log) is preserved"
 
     if [ -z "$removed" ]; then
         log_info "Nothing to remove — Parcel does not appear to be installed"
@@ -1922,6 +1915,10 @@ run_config_builder() {
     # Confirm and write
     if $YES || prompt_yesno "Write this config to $parcelfile?" true; then
         printf '%s\n' "$final_config" > "$parcelfile"
+        # Fix ownership if running as root
+        if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
+            chown "$SERVICES_USER" "$parcelfile" 2>/dev/null || true
+        fi
         log_success "Written: $parcelfile"
     else
         log_info "Config not written."
@@ -1969,6 +1966,11 @@ main() {
     parse_args "$@"
     load_dev_fallback
     detect_platform
+
+    # Override HOME for the real user when running under sudo
+    if [ -n "$SERVICES_USER" ]; then
+        HOME="$(get_user_home)"
+    fi
     check_dependencies
 
     # Parse config values needed for all actions
