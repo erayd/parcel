@@ -64,6 +64,7 @@ FORCE_GPG=false
 FORCE_JQ=false
 CUSTOM_PASSWORD_STORE_DIR=""
 WANTS_HOST_HASH=false
+REVOKE_FLATPAK_DBUS=false
 
 # Parsed config values
 HOST_NAME=""
@@ -1165,12 +1166,33 @@ preview_uninstall() {
             local app_id wrapper_dir
             app_id="$(config_query ".flatpak.browsers[$i].appId")"
             wrapper_dir="$(flatpak_wrapper_dir "$app_id")"
+
+            local os_key="$OS"
+            [ "$os_key" = "bsd" ] && os_key="linux"
+            local fp_name fp_manifest_dir fp_manifest_path
+            fp_name="$(config_query ".flatpak.browsers[$i].name")"
+            fp_manifest_dir="$(get_browser_config "$fp_name" | jq -r ".manifestDir[\"${os_key}-user\"]?")"
+            if [ -n "$fp_manifest_dir" ]; then
+                fp_manifest_dir="$(expand_tilde "$fp_manifest_dir")"
+                fp_manifest_path="$fp_manifest_dir/$HOST_NAME.json"
+                if [ -f "$fp_manifest_path" ]; then
+                    log_info "  $fp_manifest_path"
+                fi
+            fi
+
             if [ -f "$wrapper_dir/parcel-flatpak-wrapper.sh" ]; then
                 log_info "  $wrapper_dir/parcel-flatpak-wrapper.sh"
             fi
             # Flatpak override: we can't easily check, just note it
             i=$((i + 1))
         done
+
+        # Ask whether to revoke the D-Bus talk grant the wrapper needs.
+        # Default no; --yes mode keeps the default (no).
+        printf '\n' >&2
+        if prompt_yesno "Revoke the flatpak D-Bus talk grant (org.freedesktop.Flatpak) from Parcel-set-up browsers?" true; then
+            REVOKE_FLATPAK_DBUS=true
+        fi
     fi
 
     # Config files
@@ -1828,7 +1850,7 @@ do_uninstall() {
         done
     fi
 
-    # Remove flatpak wrappers and overrides
+    # Remove flatpak wrappers, manifests, and overrides
     if $HAS_FLATPAK; then
         local fp_count
         fp_count="$(config_query '.flatpak.browsers | length')"
@@ -1837,11 +1859,41 @@ do_uninstall() {
             local app_id wrapper_dir
             app_id="$(config_query ".flatpak.browsers[$i].appId")"
             wrapper_dir="$(flatpak_wrapper_dir "$app_id")"
+
+            # Flatpak manifests are always written to the user-level manifest
+            # dir (see install_flatpak_wrappers), even for system installs, so
+            # remove them here rather than via the level-scoped loop above.
+            local os_key="$OS"
+            [ "$os_key" = "bsd" ] && os_key="linux"
+            local fp_name fp_manifest_dir fp_manifest_path
+            fp_name="$(config_query ".flatpak.browsers[$i].name")"
+            fp_manifest_dir="$(get_browser_config "$fp_name" | jq -r ".manifestDir[\"${os_key}-user\"]?")"
+            if [ -n "$fp_manifest_dir" ]; then
+                fp_manifest_dir="$(expand_tilde "$fp_manifest_dir")"
+                fp_manifest_path="$fp_manifest_dir/$HOST_NAME.json"
+                if [ -f "$fp_manifest_path" ]; then
+                    rm -f "$fp_manifest_path"
+                    log_success "Removed flatpak manifest: $app_id"
+                    removed="$removed flatpak-manifest-$app_id"
+                fi
+            fi
+
             if [ -f "$wrapper_dir/parcel-flatpak-wrapper.sh" ]; then
                 rm -f "$wrapper_dir/parcel-flatpak-wrapper.sh"
                 rmdir "$wrapper_dir" 2>/dev/null || true
                 log_success "Removed flatpak wrapper: $app_id"
                 removed="$removed flatpak-$app_id"
+
+                if $REVOKE_FLATPAK_DBUS; then
+                    # Revoke the D-Bus talk grant that flatpak-spawn depends on.
+                    if [ -n "$SERVICES_USER" ]; then
+                        sudo -u "$SERVICES_USER" flatpak override --user --no-talk-name=org.freedesktop.Flatpak "$app_id" 2>/dev/null || \
+                            log_warn "Failed to revoke flatpak D-Bus grant for $app_id"
+                    else
+                        flatpak override --user --no-talk-name=org.freedesktop.Flatpak "$app_id" 2>/dev/null || \
+                            log_warn "Failed to revoke flatpak D-Bus grant for $app_id"
+                    fi
+                fi
             fi
             i=$((i + 1))
         done
