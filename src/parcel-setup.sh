@@ -678,7 +678,13 @@ detect_flatpak_browsers() {
         fi
 
         # Check if the flatpak app is installed
-        if flatpak list --columns=application 2>/dev/null | grep -q "^${app_id}$"; then
+        local flatpak_list_cmd
+        if [ -n "$SERVICES_USER" ]; then
+            flatpak_list_cmd="sudo -u $SERVICES_USER flatpak"
+        else
+            flatpak_list_cmd="flatpak"
+        fi
+        if $flatpak_list_cmd list --columns=application 2>/dev/null | grep -q "^${app_id}$"; then
             if [ -n "$DETECTED_FLATPAK_BROWSERS" ]; then
                 DETECTED_FLATPAK_BROWSERS="$DETECTED_FLATPAK_BROWSERS$newline$app_id"
             else
@@ -1282,9 +1288,14 @@ install_flatpak_wrappers() {
             generate_manifest "$engine" "$wrapper_path" "$HOST_NAME" "$ext_id" true > "$manifest_path"
         fi
 
-        # Apply flatpak override
-        flatpak override --user --talk-name=org.freedesktop.Flatpak "$app_id" 2>/dev/null || \
-            log_warn "Failed to apply flatpak override for $app_id"
+        # Apply flatpak override (must run as the real user)
+        if [ -n "$SERVICES_USER" ]; then
+            sudo -u "$SERVICES_USER" flatpak override --user --talk-name=org.freedesktop.Flatpak "$app_id" 2>/dev/null || \
+                log_warn "Failed to apply flatpak override for $app_id"
+        else
+            flatpak override --user --talk-name=org.freedesktop.Flatpak "$app_id" 2>/dev/null || \
+                log_warn "Failed to apply flatpak override for $app_id"
+        fi
 
         log_success "Flatpak wrapper installed: $app_id"
         APPLIED_CHANGES="$APPLIED_CHANGES flatpak-$app_id"
