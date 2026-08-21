@@ -422,6 +422,16 @@ parse_args() {
     if [ -z "$INSTALL_LEVEL" ]; then
         resolve_install_level "${orig_args[@]}"
     fi
+
+    # Auto re-exec with sudo for explicit --system when not root
+    if [ "$INSTALL_LEVEL" = "system" ] && [ "$(id -u)" -ne 0 ]; then
+        if $YES; then
+            die "System install requires root (re-run with sudo, or use --user)"
+        fi
+        log_info "Re-running with sudo for system-wide $ACTION..."
+        exec sudo "$0" "${orig_args[@]}"
+    fi
+
     RESOLVED_LEVEL="$INSTALL_LEVEL"
 
     # Apply prefix override
