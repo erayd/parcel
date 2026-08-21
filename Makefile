@@ -93,6 +93,7 @@ todo:
 .PHONY: test-native
 test-native:
 	bash -n src/parcel-host parcel-host
+	shellcheck -x src/parcel-host parcel-host
 	node --test $(TEST_FLAGS) test/native-host.test.js
 
 .PHONY: test-browser-mock
