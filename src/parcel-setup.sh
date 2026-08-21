@@ -767,7 +767,7 @@ detect_password_store() {
 }
 
 # Detect gpg and jq paths.
-# Priority: existing parcelrc value (if working) > default path > command -v > macOS fallbacks.
+# Priority: existing parcelrc value (if working) > default path > command -v > macOS fallbacks > interactive.
 # If a parcelrc value is set but broken, it is clobbered (FORCE_GPG/FORCE_JQ).
 # Sets CUSTOM_GPG, CUSTOM_JQ, FORCE_GPG, FORCE_JQ.
 # @since 1.0.7
@@ -786,7 +786,8 @@ detect_tool_paths() {
 }
 
 # Detect a single tool's path.
-# Checks parcelrc value first, then default path, then command -v + macOS fallbacks.
+# Checks parcelrc value first, then default path, then command -v + macOS fallbacks,
+# then interactive entry as a final fallback.
 # @param {string} tool - Tool name (e.g. gpg, jq).
 # @param {string} existing - Existing parcelrc value (may be empty).
 # @param {string} default_path - Default system path (e.g. /usr/bin/gpg).
@@ -825,6 +826,20 @@ detect_single_tool_path() {
                 break
             fi
         done
+    fi
+
+    if [ -z "$found_path" ]; then
+        # 4. Interactive fallback - let the user enter a path manually
+        if ! $YES; then
+            found_path="$(prompt "Enter path to $tool binary" "")"
+            if [ -n "$found_path" ]; then
+                found_path="$(expand_tilde "$found_path")"
+                if [ ! -x "$found_path" ]; then
+                    log_warn "$found_path is not executable"
+                    found_path=""
+                fi
+            fi
+        fi
     fi
 
     if [ -z "$found_path" ]; then
