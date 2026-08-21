@@ -1903,7 +1903,7 @@ run_config_builder() {
 
     # Sort rules by specificity: longer (more-specific) patterns first,
     # so that e.g. ^clients/help/cards/ matches before ^clients/
-    rules_json="$(printf '%s' "$rules_json" | jq 'sort_by(.pattern | length) | reverse | sort_by(.pattern) | reverse')"
+    rules_json="$(printf '%s' "$rules_json" | jq 'sort_by(.pattern | length) | reverse')"
 
     # Present suggested rules
     printf '\n' >&2
