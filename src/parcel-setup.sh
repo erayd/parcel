@@ -1127,8 +1127,14 @@ install_bootstrap_host() {
 
     # Install
     if [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
-        install -m 0755 -o "$SERVICES_USER" -g staff "$tmp_host" "$HOST_BIN_PATH" 2>/dev/null || \
-        install -m 0755 -o "$SERVICES_USER" "$tmp_host" "$HOST_BIN_PATH"
+        local primary_group
+        primary_group="$(id -gn "$SERVICES_USER" 2>/dev/null || true)"
+        if [ -n "$primary_group" ]; then
+            install -m 0755 -o "$SERVICES_USER" -g "$primary_group" "$tmp_host" "$HOST_BIN_PATH" || \
+            install -m 0755 -o "$SERVICES_USER" "$tmp_host" "$HOST_BIN_PATH"
+        else
+            install -m 0755 -o "$SERVICES_USER" "$tmp_host" "$HOST_BIN_PATH"
+        fi
     else
         mkdir -p "$HOST_BIN_DIR"
         install -m 0755 "$tmp_host" "$HOST_BIN_PATH"
