@@ -41,7 +41,6 @@ VERBOSE=false
 
 # Detected platform
 OS=""
-ARCH=""
 IS_NIXOS="${IS_NIXOS:-false}"
 
 # Resolved install configuration
@@ -186,13 +185,6 @@ normalize_os() {
         FreeBSD|OpenBSD|NetBSD|DragonFly) printf 'bsd' ;;
         *) printf '%s' "$kernel" | tr '[:upper:]' '[:lower:]' ;;
     esac
-}
-
-# Normalise the architecture from uname.
-# @returns {string} x86_64 | arm64 | aarch64 | i386
-# @since 1.0.7
-normalize_arch() {
-    uname -m
 }
 
 # Prompt the user for a string value (or return default in --yes mode).
@@ -487,11 +479,10 @@ USAGE
 # Platform detection
 # ===========================================================================
 
-# Detect the operating system and architecture.
+# Detect the operating system.
 # @since 1.0.7
 detect_platform() {
     OS="$(normalize_os)"
-    ARCH="$(normalize_arch)"
 
     case "$OS" in
         darwin|linux|bsd) ;;
@@ -500,7 +491,7 @@ detect_platform() {
             ;;
     esac
 
-    log_success "Platform: $OS ($ARCH)"
+    log_success "Platform: $OS"
 }
 
 # Detect whether running on NixOS or with the nix package manager.
