@@ -97,6 +97,11 @@ function makeValidConfig(overrides = {}) {
 
 let dom, document, window, mock, portReceivers, portCallers;
 
+// Stash reports sent from the content script to the worker ({type: "parcel-error-stash", ...}).
+const stashReports = [];
+// Snapshot of the reports produced during module init (before any test truncates them).
+let initStashReports = [];
+
 // Track timers created by integration.js so they can be cleared in after().
 const trackedTimers = [];
 
@@ -187,6 +192,11 @@ before(async () => {
         receiver.onMessage.addListener(() => {});
     });
 
+    // Record stash reports the content script sends to the worker.
+    mock.chrome.runtime.onMessage.addListener((msg) => {
+        if (msg?.type === "parcel-error-stash") stashReports.push(msg);
+    });
+
     await import("../src/js/integration.js");
     await settleAsync(); // wait for dynamic imports & onConnect microtasks
 
@@ -196,6 +206,8 @@ before(async () => {
         portReceivers["integration"].postMessage({ action: "config", config: makeValidConfig(), frameId: 0 });
     }
     await settleAsync();
+
+    initStashReports = [...stashReports];
 });
 
 after(() => {
@@ -221,6 +233,33 @@ describe("Integration script", { concurrency: false }, () => {
             mock.chrome.runtime.onMessage.removeListener(listener);
         }
         assert.deepStrictEqual(received, { type: "keepalive" }, "keepalive callback should send {type: 'keepalive'} to the worker");
+    });
+
+    test("document lifecycle reports stash presence (fresh init and bfcache restore)", async () => {
+        // fresh init: the snapshot in before() — a fresh top document reports no stash
+        assert.ok(
+            initStashReports.some((r) => r.stashed === false),
+            "a fresh top document must report the absence of a stashed error",
+        );
+
+        // bfcache restore: a persisted pageshow must re-report a present stash
+        clearBody();
+        delete document._parcelError;
+        mock.chrome.runtime.sendMessage({ action: "parcel-error-stash", error: "bfcache fill error" });
+        await settleAsync();
+        stashReports.length = 0;
+
+        const ev = new window.Event("pageshow");
+        ev.persisted = true;
+        window.dispatchEvent(ev);
+
+        assert.ok(
+            stashReports.some((r) => r.stashed === true),
+            "a bfcache restore must re-report the stashed error as still present",
+        );
+
+        // clean up for the tests that follow — only this test asserts on the leftover stash
+        delete document._parcelError;
     });
 
     function clearBody() {
@@ -1093,6 +1132,76 @@ describe("Integration script", { concurrency: false }, () => {
         assert.ok(msg.error.includes("Cannot find a suitable autofill target"));
     });
 
+    test("broadcast error on a dead port is stashed on the document", async () => {
+        clearBody();
+        stashReports.length = 0;
+        // connect a broadcast popup and kill the port before the content
+        // script processes the connection; the error post must fail
+        const port = mock.chrome.runtime.connect({ name: "broadcast" });
+        port.disconnect();
+        await settleAsync();
+
+        assert.strictEqual(document._parcelError, "Cannot find a suitable autofill target.");
+        assert.ok(
+            stashReports.some((r) => r.stashed === true),
+            "the stash presence must be reported so the worker can badge the tab",
+        );
+
+        // clean up for the tests that follow — only this test asserts on the leftover stash
+        delete document._parcelError;
+    });
+
+    test("undeliverable popup error in a non-top frame is relayed to the worker instead of stashed", async () => {
+        clearBody();
+        delete document._parcelError;
+        stashReports.length = 0;
+        const input = makeInput({ type: "email", name: "user" });
+        const popupPromise = nextMessage(portReceivers["trigger"], "trigger-popup", 3000);
+        await click(input);
+        await popupPromise;
+        const token = input._parcelToken;
+        assert.ok(token);
+
+        // pretend this is an iframe: JSDOM cannot represent a non-top frame
+        // (its window.top is an immutable self-reference), so swap
+        // globalThis.window for a proxy whose top is a different object. The
+        // swap must cover the async continuation in which the failed error
+        // post relays, so it is restored only after settleAsync().
+        const realWindow = globalThis.window;
+        const iframeWindow = new Proxy(realWindow, {
+            get(t, p) {
+                if (p === "top") return {}; // some other object - this "frame" is not the top frame
+                const v = Reflect.get(t, p, t);
+                return typeof v === "function" ? v.bind(t) : v;
+            },
+            set(t, p, v) {
+                return Reflect.set(t, p, v, t);
+            },
+            has(t, p) {
+                return Reflect.has(t, p);
+            },
+        });
+        try {
+            input.style.display = "none"; // make getTargetInfo reject so the error post fires
+            globalThis.window = iframeWindow;
+            const port = mock.chrome.runtime.connect({ name: token });
+            port.disconnect();
+            await settleAsync();
+        } finally {
+            globalThis.window = realWindow;
+        }
+
+        assert.strictEqual(document._parcelError, undefined, "a non-top frame must not write the top frame's stash");
+        const relays = stashReports.filter((r) => typeof r.error === "string");
+        assert.strictEqual(relays.length, 1, "exactly one error must be relayed to the worker");
+        assert.ok(
+            relays[0].error.includes("The best-match autofill candidate was unsuitable"),
+            "the relayed error must be the popup error",
+        );
+        assert.ok(!("stashed" in relays[0]), "a relayed error must not carry a presence field");
+        delete document._parcelError;
+    });
+
     test("broadcast token is regenerated when retriggering context popup (issue #79)", async () => {
         // Simulate the toolbar popup: open a broadcast connection against a
         // target, then close it without filling. The element retains a stale
@@ -1172,6 +1281,53 @@ describe("Integration script", { concurrency: false }, () => {
         const msg = await originPromise;
 
         assert.strictEqual(msg.targetClasses, undefined, "targetClasses is only sent to broadcast connections");
+    });
+
+    test("stash instruction stores the error, which the next popup consumes and clears", async () => {
+        clearBody();
+        makeInput({ type: "email", name: "user" });
+        delete document._parcelError;
+        stashReports.length = 0;
+        mock.chrome.runtime.sendMessage({ action: "parcel-error-stash", error: "the fill failed" });
+        await settleAsync();
+        assert.strictEqual(document._parcelError, "the fill failed", "the instruction handler must store the stash");
+        assert.ok(
+            stashReports.some((r) => r.stashed === true),
+            "the instruction handler must report stash presence for the badge",
+        );
+
+        const port = mock.chrome.runtime.connect({ name: "broadcast" });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const errPromise = nextMessage(port, "error", 3000);
+        const originPromise = nextMessage(port, "origin", 3000);
+        port.postMessage({ action: "ready" });
+        assert.strictEqual((await errPromise).error, "An earlier error occurred: the fill failed");
+        await originPromise;
+
+        assert.strictEqual(document._parcelError, undefined, "the stash must be deleted after a successful delivery");
+        assert.ok(
+            stashReports.some((r) => r.stashed === false),
+            "the badge clear must be reported after delivery",
+        );
+    });
+
+    test("broadcast popup ready without a stashed error pushes no error", async () => {
+        clearBody();
+        makeInput({ type: "email", name: "user" });
+        delete document._parcelError;
+        stashReports.length = 0;
+        const port = mock.chrome.runtime.connect({ name: "broadcast" });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        let sawError = false;
+        port.onMessage.addListener((msg) => {
+            if (msg?.action === "error") sawError = true;
+        });
+        const originPromise = nextMessage(port, "origin", 3000);
+        port.postMessage({ action: "ready" });
+        await originPromise;
+        await settleAsync();
+        assert.strictEqual(sawError, false, "no error may be pushed when no stash exists");
+        assert.strictEqual(stashReports.length, 0, "no badge report may be sent when no stash exists");
     });
 
     // -----------------------------------------------------------------------
