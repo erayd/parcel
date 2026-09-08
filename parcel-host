@@ -20,7 +20,7 @@ set -e
 
 TOKEN="broadcast"
 PARCEL_HOST=""
-BOOTSTRAP_VERSION="2"
+BOOTSTRAP_VERSION="3"
 
 # transmit message in native messaging host protocol
 function parcel_transmit() {
@@ -52,6 +52,9 @@ if [ ! -e "$PARCELRC" ]; then
 
 # Valid signers for the main host script which is bundled with the extension (space-separated)
 #VALID_SIGNERS="88FF14D6294AF4036B7F00FF676A3C09E2E47A72 56C3E775E72B0C8B1C0C1BD0B5DB77409B11B601 82ED663067C6017BAA4BC752EB670BF2B1131683 B0908ED59A96C9882BED9A942A51761511A30253"
+
+# Signers to revoke even if valid (space-separated, primary or subkey fingerprint)
+#BLACKLIST_SIGNERS=""
 
 # If you use MacOS, you may wish to include homebrew's bin directory in parcel's PATH
 #PATH="\$PATH:/opt/homebrew/bin"
@@ -103,6 +106,30 @@ exec 5>>"$LOGFILE"
 exec 2>&5
 chmod 0600 "$LOGFILE"
 if [ -z "$VALID_SIGNERS" ]; then VALID_SIGNERS="88FF14D6294AF4036B7F00FF676A3C09E2E47A72 56C3E775E72B0C8B1C0C1BD0B5DB77409B11B601 82ED663067C6017BAA4BC752EB670BF2B1131683 B0908ED59A96C9882BED9A942A51761511A30253"; fi
+
+# GPG emits uppercase fingerprints; normalise config lists so comparisons match exactly
+VALID_SIGNERS="$(tr '[:lower:]' '[:upper:]' <<< "$VALID_SIGNERS")"
+
+# resolve the state file (also overridable via parcelrc)
+STATEFILE="${STATEFILE:-$CONFIG_DIR/state}"
+
+# a signer fingerprint is exactly 40 or 64 hex characters
+FPR_PATTERN='[0-9A-Fa-f]{40}([0-9A-Fa-f]{24})?'
+FPR_RE="^${FPR_PATTERN}$"
+# a well-formed blacklist value: empty or space-separated fingerprints
+BLACKLIST_VALUE_RE="^(${FPR_PATTERN}( ${FPR_PATTERN})*)?$"
+
+# capture the parcelrc blacklist separately so the state-file list can be
+# combined with it rather than clobbered
+PARCELRC_BLACKLIST="$(tr '[:lower:]' '[:upper:]' <<< "${BLACKLIST_SIGNERS:-}")"
+if [[ ! "$PARCELRC_BLACKLIST" =~ $BLACKLIST_VALUE_RE ]]; then
+    printf '[%s] parcelrc BLACKLIST_SIGNERS is malformed; ignoring it\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >&5
+    PARCELRC_BLACKLIST=""
+fi
+
+# effective revocation list (state-file value, then the shipped list)
+BLACKLIST_SIGNERS=""
+
 if [ -n "$GPG" ]; then function gpg() { "$GPG" "$@"; return $?; }; fi
 if [ -n "$JQ" ]; then function jq() { "$JQ" "$@"; return $?; }; fi
 
@@ -128,6 +155,57 @@ function parcel_send() {
     if [ ${#1} -gt 0 ]; then
         parcel_transmit "$(jq --arg token "$TOKEN" '{token: $token, data: .}' <<< "$1")"
     fi
+}
+
+# Load the signer blacklist from the state file, or its locked variant.
+# Unknown state lines are ignored: only the blacklist value is validated, so
+# future state fields can't break the bootstrap. Missing files, bad
+# permissions, or a malformed value leave the blacklist empty. The value
+# stands only until the next install; durable revocations belong in parcelrc.
+#
+# @return 0 always; problems are logged, not reported.
+# @since 1.0.7
+function load_blacklist() {
+    # deliberately lockless to keep the bootstrap simple: a mid-save read fails validation and fails open
+    local FILE="$STATEFILE"
+    if [ ! -e "$FILE" ] && [ -e "$STATEFILE.locked" ]; then
+        FILE="$STATEFILE.locked"
+    fi
+    [ -e "$FILE" ] || return 0
+    if [ "$FILE" != "$(find "$FILE" -maxdepth 1 -type f -perm 0600 2>/dev/null || true)" ]; then
+        printf '[%s] state file %s must have permissions 0600; ignoring blacklist\n' \
+            "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$FILE" >&5
+        return 0
+    fi
+    local CONTENT VALUE
+    CONTENT="$(cat "$FILE" 2>/dev/null)" || return 0
+    VALUE="$(sed -n 's/^BLACKLIST_SIGNERS="\(.*\)"$/\1/p' <<< "$CONTENT" | tail -n1)"
+    VALUE="$(tr '[:lower:]' '[:upper:]' <<< "$VALUE")"
+    if [[ ! "$VALUE" =~ $BLACKLIST_VALUE_RE ]]; then
+        printf '[%s] state file %s has an invalid blacklist value; ignoring blacklist\n' \
+            "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$FILE" >&5
+        return 0
+    fi
+    BLACKLIST_SIGNERS="$VALUE"
+    return 0
+}
+
+# Check whether a fingerprint is on the effective revocation list.
+#
+# @param {string} fingerprint - The fingerprint to check.
+# @return 0 if blacklisted, 1 otherwise.
+# @since 1.0.7
+function blacklisted() {
+    [ -n "$1" ] || return 1
+    local FPR TARGET
+    TARGET="$(tr '[:lower:]' '[:upper:]' <<< "$1")"
+    # deliberately unquoted: the lists are space-separated, and regex-validated as hex so glob expansion is impossible
+    for FPR in $PARCELRC_BLACKLIST $BLACKLIST_SIGNERS; do
+        if [ "$FPR" = "$TARGET" ]; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 # bootstrap host script from extension
@@ -164,15 +242,30 @@ function action_install() {
     fi
     rm -f "$KEYRING" "$KEYRING"~
 
-    # verify signer — accept if any signature is from a trusted key
+    # verify signer: accept the first signature from a trusted, non-revoked
+    # key. Field 12 is the primary fingerprint (whitelist); field 3 is the
+    # signing key, which may be a subkey. The blacklist matches either.
+    local LINE
     local SIGNER
+    local SIGNING_KEY
     local SIGNER_VALID=false
-    while IFS= read -r SIGNER; do
-        if [[ -n "$SIGNER" && " $VALID_SIGNERS " =~ [[:space:]]${SIGNER}[[:space:]] ]]; then
+    while IFS= read -r LINE; do
+        SIGNER="$(cut -d' ' -f12 <<< "$LINE")"
+        SIGNING_KEY="$(cut -d' ' -f3 <<< "$LINE")"
+        # non-hex values can never exactly match a well-formed list
+        [[ "$SIGNER" =~ $FPR_RE ]] || SIGNER=""
+        [[ "$SIGNING_KEY" =~ $FPR_RE ]] || SIGNING_KEY=""
+        if [ -n "$SIGNER" ] && [[ " $VALID_SIGNERS " =~ [[:space:]]${SIGNER}[[:space:]] ]]; then
+            if blacklisted "$SIGNER" || blacklisted "$SIGNING_KEY"; then
+                # Log the revocation; do not leak it to the extension.
+                printf '[%s] Signature verification failed: signer %s (signing key %s) is blacklisted\n' \
+                    "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$SIGNER" "${SIGNING_KEY:-unknown}" >&5
+                continue
+            fi
             SIGNER_VALID=true
             break
         fi
-    done < <(grep '^\[GNUPG:\] VALIDSIG ' <<< "$OUT" | cut -d' ' -f12)
+    done < <(grep '^\[GNUPG:\] VALIDSIG ' <<< "$OUT")
     if ! $SIGNER_VALID; then
         # Log the full GPG status output for debugging; do not leak it to the extension.
         printf '[%s] Signature verification failed: No valid signer fingerprint:\n%s\n' \
@@ -244,6 +337,9 @@ fi
 if ! GNUPGHOME=/dev/null gpg --version &> /dev/null; then
     parcel_error "gpg is not executable: ${GPG:-gpg}" 1
 fi
+
+# load the persisted signer revocation list before the event loop
+load_blacklist
 
 # tell the extension that we are ready for bootstrapping
 parcel_send "$(jq -n --arg version "$BOOTSTRAP_VERSION" '{action: "bootstrap", version: $version}')"
