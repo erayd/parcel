@@ -433,7 +433,7 @@ resolve_install_level() {
     # Interactive: ask whether to operate system-wide
     local verb="Install"
     [ "$ACTION" = "uninstall" ] && verb="Uninstall"
-    if prompt_yesno "$verb system-wide? (requires sudo)" true; then
+    if prompt_yesno "$verb system-wide? (recommended for better security; requires sudo)" true; then
         log_info "Re-running with sudo for system-wide $ACTION..."
         exec sudo env "PARCEL_SUDO_ELEVATED=1" "USER_PATH=$USER_PATH" "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-}" bash "$0" --system "$@"
     fi
@@ -535,8 +535,8 @@ print_usage() {
 Usage: parcel-setup.sh [options]
 
 Install options:
-  --system            Install system-wide (requires sudo, will prompt if omitted)
-  --user              Install user-level (no sudo needed, no prompt if omitted)
+  --system            Install system-wide (recommended for better security; requires sudo)
+  --user              Install user-level (no sudo needed)
   --prefix <path>     Custom installation prefix
   --passdir <path>    Custom password store directory (overrides PASSWORD_STORE_DIR)
   --browser <name>    Set up only the specified browser(s) (comma or space separated)
@@ -898,52 +898,185 @@ detect_tool_paths() {
     detect_single_tool_path "openssl" "$existing_openssl" "/usr/bin/openssl" CUSTOM_OPENSSL FORCE_OPENSSL
 }
 
+# Test whether the invoking user can modify a path.
+# @param {string} path - Path to check.
+# @return {boolean} True if the invoking user can modify it.
+# @since 1.0.7
+test_writable_by_user() {
+    local path="$1"
+    if [ "$(id -u)" -eq 0 ]; then
+        if [ -n "$SERVICES_USER" ]; then
+            # Sanity-check the dropped-privilege probe once: the services user
+            # cannot write the root directory, so only exit code 1 proves the
+            # probe itself ran. Anything else (unknown user, policy denial,
+            # missing sudo) fails closed: every path is reported as user-writable
+            # so callers reject instead of accept.
+            if [ -z "${SERVICES_USER_PROBE_RC:-}" ]; then
+                SERVICES_USER_PROBE_RC=1
+                sudo -u "$SERVICES_USER" test -w / 2>/dev/null || SERVICES_USER_PROBE_RC=$?
+            fi
+            if [ "$SERVICES_USER_PROBE_RC" -ne 1 ]; then
+                return 0
+            fi
+            sudo -u "$SERVICES_USER" test -w "$path"
+        else
+            # As root the owner-writability test is meaningless, so judge the path's
+            # own permission bits instead: group- or other-writable means modifiable.
+            # stat is used rather than find: -perm /022 is GNU-only, and find without
+            # -maxdepth 0 would walk the entire subtree of every path checked.
+            local mode
+            mode="$(stat -L -c %a "$path" 2>/dev/null || stat -L -f %p "$path" 2>/dev/null)" || return 0
+            mode="${mode: -3}"
+            case "$mode" in
+                "" | *[!0-7]*) return 0 ;;
+            esac
+            [ "$((8#$mode & 8#022))" -ne 0 ]
+        fi
+    else
+        [ -w "$path" ]
+    fi
+}
+
+# Resolve a symlink chain to its final target. Relative link targets are
+# resolved against the directory of the link; .. segments are not normalised
+# (writability tests do not require it). Chains longer than 40 links fail.
+# @param {string} path - Absolute start path.
+# @output {string} The resolved path.
+# @return 0 on success, 1 if a link cannot be read.
+# @since 1.0.7
+resolve_symlink_chain() {
+    local path="$1" next hops=0
+    while [ -L "$path" ]; do
+        hops=$((hops + 1))
+        [ "$hops" -le 40 ] || return 1
+        next="$(readlink "$path")" || return 1
+        case "$next" in
+            /*) path="$next" ;;
+            *) path="${path%/*}/$next" ;;
+        esac
+    done
+    printf '%s\n' "$path"
+}
+
+# Test whether a binary path would be accepted by the bootstrap: an absolute-path
+# executable regular file, plus (for system-wide installs) root ownership and no
+# write access for the invoking user, with the containing directory also off-limits,
+# mirroring the bootstrap's strict-mode rules (including a root-owned symlink link
+# and a fully-resolved target outside writable directories).
+# @param {string} path - Absolute path to check.
+# @return {boolean} True if acceptable.
+# @since 1.0.7
+tool_acceptable() {
+    local path="$1"
+    case "$path" in
+        /*) ;;
+        *) return 1 ;;
+    esac
+    [ -f "$path" ] && [ -x "$path" ] || return 1
+    [ "$INSTALL_LEVEL" = "system" ] || return 0
+    local owner
+    owner="$(stat -L -c %u "$path" 2>/dev/null || stat -L -f %u "$path" 2>/dev/null)" || owner=""
+    [ "$owner" = "0" ] || return 1
+    if test_writable_by_user "$path"; then
+        return 1
+    fi
+    local parent="${path%/*}"
+    [ -n "$parent" ] || parent="/"
+    if test_writable_by_user "$parent"; then
+        return 1
+    fi
+    if [ -L "$path" ]; then
+        # the bootstrap requires the link itself to be root-owned too (a
+        # caller-owned symlink can be repointed after startup), and the final
+        # target to sit outside writable directories
+        local link_owner resolved resolved_parent
+        link_owner="$(stat -c %u "$path" 2>/dev/null || stat -f %u "$path" 2>/dev/null)" || link_owner=""
+        [ "$link_owner" = "0" ] || return 1
+        resolved="$(resolve_symlink_chain "$path")" || return 1
+        resolved_parent="${resolved%/*}"
+        [ -n "$resolved_parent" ] || resolved_parent="/"
+        if test_writable_by_user "$resolved_parent"; then
+            return 1
+        fi
+    fi
+    return 0
+}
+
 # Detect a single tool's path.
-# Checks parcelrc value first, then default path, then command -v + macOS fallbacks,
-# then interactive entry as a final fallback.
+# Checks parcelrc value first, then default path, then the user's PATH + macOS
+# fallbacks, then interactive entry as a final fallback. Candidates the bootstrap
+# would reject (e.g. non-root-owned binaries on a system-wide install) are skipped,
+# so a root-owned copy elsewhere is preferred over a user-owned one earlier in PATH.
 # @param {string} tool - Tool name (e.g. gpg, jq).
 # @param {string} existing - Existing parcelrc value (may be empty).
 # @param {string} default_path - Default system path (e.g. /usr/bin/gpg).
 # @param {string} custom_var - Name of the global to set with the custom path.
 # @param {string} force_var - Name of the global to set true if clobbering.
+# @output Sets EFFECTIVE_<TOOL> (tool name uppercased) to the path that was
+#     accepted or left in place, for validation by warn_nonroot_tools.
 # @since 1.0.7
 detect_single_tool_path() {
     local tool="$1" existing="$2" default_path="$3"
     local custom_var="$4" force_var="$5"
-    local found_path
+    local found_path=""
+    local effective_var
+    effective_var="EFFECTIVE_$(printf '%s' "$tool" | tr '[:lower:]' '[:upper:]')"
+    printf -v "$effective_var" '%s' ''
 
     # 1. Existing parcelrc value - respect it if still usable
     if [ -n "$existing" ]; then
-        local usable=false
+        local existing_resolved="$existing"
+        # shellcheck disable=SC2016 # single quotes are intentional: branch patterns match literal $HOME and ${HOME} tokens
         case "$existing" in
-            */*) [ -x "$existing" ] && usable=true ;;
-            *) PATH="$USER_PATH" command -v "$existing" >/dev/null 2>&1 && usable=true ;;
+            '$HOME'/*) existing_resolved="$HOME/${existing#'$HOME'/}" ;;
+            '${HOME}'/*) existing_resolved="$HOME/${existing#'${HOME}'/}" ;;
+            /* | */*) ;;
+            *) existing_resolved="$(PATH="$USER_PATH" command -v "$existing" 2>/dev/null || echo "")" ;;
         esac
-        if $usable; then
+        if tool_acceptable "$existing_resolved"; then
             log_info "$tool already set in parcelrc ($existing) - leaving as-is"
+            printf -v "$effective_var" '%s' "$existing_resolved"
             return
         fi
         log_warn "$tool in parcelrc ($existing) is not usable - will overwrite"
     fi
 
     # 2. Default path visible to the host (no customisation needed)
-    if [ -z "$existing" ] && [ -x "$default_path" ]; then
+    if [ -z "$existing" ] && tool_acceptable "$default_path"; then
+        printf -v "$effective_var" '%s' "$default_path"
         return
     fi
 
-    # 3. Fall back to command -v, then macOS-specific locations
-    found_path="$(command -v "$tool" 2>/dev/null || echo "")"
-
-    # macOS fallback: common Homebrew locations may not be in the shell's PATH
-    # (e.g. when running under sudo with a sanitised PATH)
-    if [ -z "$found_path" ]; then
-        local candidate
-        for candidate in "/opt/homebrew/bin/$tool" "/usr/local/bin/$tool"; do
-            if [ -x "$candidate" ]; then
+    # 3. Search the user's PATH, then the default path and macOS-specific locations
+    #    (Homebrew prefixes may be absent from the shell's PATH, e.g. under sudo).
+    local dir candidate skipped=""
+    local old_ifs="$IFS"
+    IFS=':'
+    for dir in $USER_PATH; do
+        [ -n "$dir" ] || continue
+        candidate="$dir/$tool"
+        if [ -f "$candidate" ] && [ -x "$candidate" ]; then
+            if tool_acceptable "$candidate"; then
                 found_path="$candidate"
                 break
             fi
+            skipped="$skipped $candidate"
+        fi
+    done
+    IFS="$old_ifs"
+    if [ -z "$found_path" ]; then
+        for candidate in "$default_path" "/opt/homebrew/bin/$tool" "/usr/local/bin/$tool"; do
+            if [ -f "$candidate" ] && [ -x "$candidate" ]; then
+                if tool_acceptable "$candidate"; then
+                    found_path="$candidate"
+                    break
+                fi
+                skipped="$skipped $candidate"
+            fi
         done
+    fi
+    if [ -n "$skipped" ] && [ "$INSTALL_LEVEL" = "system" ]; then
+        log_info "rejected for strict mode (must be root-owned, in a directory not writable by you):$skipped"
     fi
 
     if [ -z "$found_path" ]; then
@@ -952,8 +1085,8 @@ detect_single_tool_path() {
             found_path="$(prompt "Enter path to $tool binary" "")"
             if [ -n "$found_path" ]; then
                 found_path="$(expand_tilde "$found_path")"
-                if [ ! -x "$found_path" ]; then
-                    log_warn "$found_path is not executable"
+                if ! tool_acceptable "$found_path"; then
+                    log_warn "$found_path is not acceptable (must be executable, and root-owned in a directory not writable by you for system-wide installs)"
                     found_path=""
                 fi
             fi
@@ -969,8 +1102,44 @@ detect_single_tool_path() {
 
     # Set the custom path; force if we're replacing a broken existing value
     printf -v "$custom_var" '%s' "$found_path"
+    printf -v "$effective_var" '%s' "$found_path"
     if [ -n "$existing" ]; then
         printf -v "$force_var" '%s' true
+    fi
+}
+
+# Warn when the effective tool binaries would fail the bootstrap's strict-mode bar
+# (root-owned and not writable by the invoking user) during a system-wide install.
+# Validates the paths detection actually accepted (or left in place) rather than
+# re-resolving tool names via USER_PATH: the bootstrap resolves bare names through
+# its own sanitised PATH, so a re-resolution here could point at a binary the host
+# would never use.
+# @since 1.0.7
+warn_nonroot_tools() {
+    [ "$INSTALL_LEVEL" = "system" ] || return 0
+
+    local warned=false
+    local name ref effective tool
+    for name in GPG JQ OPENSSL; do
+        ref="CUSTOM_$name"
+        effective="${!ref:-}"
+        if [ -z "$effective" ]; then
+            ref="EFFECTIVE_$name"
+            effective="${!ref:-}"
+        fi
+        tool="$(tr '[:upper:]' '[:lower:]' <<< "$name")"
+        if [ -z "$effective" ]; then
+            log_warn "No acceptable $tool binary was found - a system-wide bootstrap will refuse to start"
+            warned=true
+            continue
+        fi
+        if ! tool_acceptable "$effective"; then
+            log_warn "$name ($effective) is not root-owned, or is writable by you or sits in a directory writable by you - a system-wide bootstrap will refuse to use it"
+            warned=true
+        fi
+    done
+    if $warned; then
+        log_warn "Choose a user-level install instead, or install root-owned copies of the tools above."
     fi
 }
 
@@ -1041,6 +1210,7 @@ run_detect() {
     confirm_browsers
     if ! $IS_NIXOS; then
         detect_tool_paths
+        warn_nonroot_tools
     fi
     offer_host_hash
 }
@@ -1318,9 +1488,28 @@ install_bootstrap_host() {
     tmp_host="$(make_temp)"
     printf '%s' "$BOOTSTRAP_HOST" > "$tmp_host"
 
+    # /bin/bash is absent on NixOS and the BSDs - rewrite the shebang to the bash
+    # running this script. /usr/bin/env is not an option: it resolves via PATH.
+    if [ ! -x "${BOOTSTRAP_SHEBANG_BASH:-/bin/bash}" ]; then
+        local bash_path="${BASH:-}"
+        if [ -z "$bash_path" ] || [ ! -x "$bash_path" ]; then
+            die "Cannot locate a bash binary to use for the installed host's shebang"
+        fi
+        local tmp_shebang
+        tmp_shebang="$(make_temp)"
+        { printf '#!%s -p\n' "$bash_path"; tail -n +2 "$tmp_host"; } > "$tmp_shebang" || \
+            die "Failed to rewrite host shebang (no /bin/bash on this system)"
+        mv "$tmp_shebang" "$tmp_host"
+    fi
+
     # Install
     if [ "$RESOLVED_LEVEL" = "system" ]; then
         mkdir -p "$HOST_BIN_DIR"
+        # A system-wide install into a user-writable directory offers no extra protection:
+        # the bootstrap could be replaced via rename, so strict mode would be unavailable.
+        if test_writable_by_user "$HOST_BIN_DIR"; then
+            log_warn "$HOST_BIN_DIR is writable by you - a bootstrap installed there could be replaced by user-level malware, so it will not gain strict-mode hardening"
+        fi
         install -m 0755 "$tmp_host" "$HOST_BIN_PATH"
     elif [ "$(id -u)" -eq 0 ] && [ -n "$SERVICES_USER" ]; then
         mkdir -p "$HOST_BIN_DIR"
@@ -1561,22 +1750,42 @@ install_flatpak_wrappers() {
 # Smoke test
 # ===========================================================================
 
+# Extract the bootstrap host's first native-protocol error message from its captured
+# stdout into HOST_FAILURE_MSG (empty when nothing could be extracted).
+# @param {string} out_file - File containing captured host stdout.
+# @since 1.0.7
+extract_host_error() {
+    HOST_FAILURE_MSG=""
+    [ -s "$1" ] || return 0
+    HOST_FAILURE_MSG="$(tail -c +5 "$1" 2>/dev/null | jq -r '.error // empty' 2>/dev/null)"
+}
+
 # Run the bootstrap host as the correct user.
-# Stdout is discarded - the native messaging protocol output is not needed
-# during the smoke test, and leaking it to the terminal is confusing.
 # @param {string} host_bin - Path to the bootstrap host binary.
 # @returns {number} Exit code of the host.
 # @since 1.0.7
 run_host_as_user() {
-    local host_bin="$1"
+    local host_bin="$1" out_file rc
+    out_file="$(mktemp)" || die "Failed to create temp file"
 
     if [ -n "$SERVICES_USER" ]; then
-        printf '' | sudo -u "$SERVICES_USER" env "HOME=$HOME" "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-}" "$host_bin" >/dev/null 2>/dev/null
-        return $?
+        # shellcheck disable=SC2024 # the redirect deliberately runs as the invoking (root) user
+        printf '' | sudo -u "$SERVICES_USER" env "HOME=$HOME" "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-}" "$host_bin" >"$out_file" 2>/dev/null
+        rc=$?
     else
-        printf '' | "$host_bin" >/dev/null 2>/dev/null
-        return $?
+        # A literal root shell would silently disable the bootstrap's strict mode, so a
+        # passing smoke test would not cover what real (non-root) browser users hit
+        if [ "$(id -u)" -eq 0 ] && [ -z "${STRICT_SMOKE_WARNED:-}" ]; then
+            log_warn "Smoke test is running as root, so strict-mode tool checks are not exercised - verify GPG/JQ/OPENSSL resolve to root-owned binaries."
+            STRICT_SMOKE_WARNED=true
+        fi
+        printf '' | "$host_bin" >"$out_file" 2>/dev/null
+        rc=$?
     fi
+
+    [ $rc -ne 0 ] && extract_host_error "$out_file"
+    rm -f "$out_file"
+    return $rc
 }
 
 # Run the first smoke test (cold start).
@@ -1594,6 +1803,7 @@ first_smoke_test() {
 
     if [ $rc -ne 0 ] && [ ! -f "$parcelrc" ]; then
         log_error "First smoke test failed and parcelrc was not created"
+        [ -n "$HOST_FAILURE_MSG" ] && log_error "Host reported: $HOST_FAILURE_MSG"
         log_error "This usually means jq or gpg are not in the default PATH"
         die "Smoke test failed (exit code $rc)"
     fi
@@ -1605,6 +1815,7 @@ first_smoke_test() {
 
     if [ $rc -ne 0 ]; then
         log_warn "First smoke test exited with code $rc (likely gpg not in default PATH)"
+        [ -n "$HOST_FAILURE_MSG" ] && log_warn "Host reported: $HOST_FAILURE_MSG"
         log_info "  Custom tool paths will be applied before the second smoke test"
     else
         log_success "First smoke test passed (parcelrc created/verified)"
@@ -1622,6 +1833,7 @@ second_smoke_test() {
 
     if [ $rc -ne 0 ]; then
         log_error "Second smoke test failed (exit code $rc)"
+        [ -n "$HOST_FAILURE_MSG" ] && log_error "Host reported: $HOST_FAILURE_MSG"
 
         # Revert parcelrc customisations if we have a backup
         local parcelrc="$CONFIG_DIR/parcelrc"

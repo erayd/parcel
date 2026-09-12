@@ -10,7 +10,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert";
 import { createHash, verify } from "node:crypto";
-import { spawn, execSync } from "node:child_process";
+import { spawn, execSync, spawnSync } from "node:child_process";
 import {
     mkdtempSync,
     writeFileSync,
@@ -20,6 +20,7 @@ import {
     readFileSync,
     readdirSync,
     symlinkSync,
+    lstatSync,
     utimesSync,
     statSync,
     existsSync,
@@ -485,6 +486,34 @@ exec $(which gpg || echo /usr/bin/gpg) "$@"
     );
     chmodSync(env.mockGpgPath, 0o755);
 }
+
+/**
+ * Extract a bash function definition verbatim from the bootstrap host source, so its
+ * logic can be exercised in isolation (strict-mode behaviour cannot be triggered
+ * end-to-end from an unprivileged test run).
+ */
+function extractBootstrapFn(name) {
+    const src = readFileSync("parcel-host", "utf8");
+    const match = src.match(new RegExp(`^function ${name}\\(\\) \\{\\n(?:.|\\n)*?^\\}\\n`, "m"));
+    assert.ok(match, `parcel-host must define ${name}()`);
+    return match[0];
+}
+
+/**
+ * Neither host script may invoke bash: a bash child re-imports the raw BASH_FUNC_*
+ * residue that the bootstrap's -p mode leaves in the environment (those entries
+ * cannot be unset), resurrecting attacker function definitions inside the child.
+ * This check is textual only: it catches invocations whose source line contains
+ * "bash" (e.g. `bash -c`, `bash script`). It cannot detect executing an external
+ * script with a bash shebang, where no "bash" text appears in these files; that
+ * case remains a review-time rule.
+ */
+test("neither host script invokes bash", () => {
+    const res = spawnSync("bash", ["-c", "grep -h bash parcel-host src/parcel-host | grep -v '^[[:space:]]*#'"], {
+        encoding: "utf8",
+    });
+    assert.strictEqual(res.status, 1, `Non-comment bash references exist in the host scripts:\n${res.stdout}`);
+});
 
 describe("Bootstrap script", () => {
     test("sends bootstrap message on startup", async () => {
@@ -1143,6 +1172,500 @@ function action_test_override() {
         } finally {
             if (!proc.killed) proc.kill();
             env.cleanup();
+        }
+    });
+
+    test("does not execute embedded content in parcelrc and ignores unknown keys", async () => {
+        const env = createTestEnv();
+        const parcelrc = join(env.home, ".config", "parcel", "parcelrc");
+        const existing = readFileSync(parcelrc, "utf8");
+        writeFileSync(
+            parcelrc,
+            existing +
+                [
+                    '$(touch "$HOME/pwned-subshell")',
+                    '`touch "$HOME/pwned-backtick"`',
+                    'evil() { touch "$HOME/pwned-func"; }',
+                    'touch "$HOME/pwned-bare"',
+                    // a recognised key whose value contains shell substitutions
+                    'PASSWORD_STORE_DIR="$(touch $HOME/pwned-value)"',
+                    // canonical assignments to keys the bootstrap must not honour
+                    'TOKEN="eviltoken"',
+                    'FUTURE_KEY="future value"',
+                ].join("\n") +
+                "\n",
+        );
+
+        const { proc, read, send } = spawnBootstrap(env);
+        try {
+            const bootMsg = await read();
+            assert.strictEqual(bootMsg.token, "broadcast", "parcelrc must not be able to set TOKEN");
+            assert.strictEqual(bootMsg.data?.action, "bootstrap");
+
+            for (const marker of ["pwned-subshell", "pwned-backtick", "pwned-func", "pwned-bare", "pwned-value"]) {
+                assert.ok(!existsSync(join(env.home, marker)), `parcelrc must not execute embedded content (${marker})`);
+            }
+
+            // recognised keys continue to work alongside the ignored content
+            send({ action: "install", script: "console.log('host script');", signature: "sig" });
+            const installMsg = await read();
+            assert.strictEqual(installMsg.data?.success, true, `Expected successful install, got: ${JSON.stringify(installMsg)}`);
+
+            const logContent = readFileSync(join(env.home, ".local", "log", "parcel-host.log"), "utf8");
+            assert.ok(logContent.includes("ignoring unrecognised content"), `Expected ignored-line log entries, got: ${logContent}`);
+            assert.ok(logContent.includes("ignoring unsafe value"), `Expected unsafe-value log entry, got: ${logContent}`);
+        } finally {
+            proc.kill();
+            env.cleanup();
+        }
+    });
+
+    test("ignores PATH settings in parcelrc, with a log warning", async () => {
+        const env = createTestEnv();
+        const parcelrc = join(env.home, ".config", "parcel", "parcelrc");
+        const existing = readFileSync(parcelrc, "utf8");
+        writeFileSync(parcelrc, existing + 'PATH="/definitely/not/on/the/real/path"\n');
+
+        const { proc, read, send } = spawnBootstrap(env);
+        try {
+            await read(); // bootstrap msg
+            // gpg/jq are still found via the environment PATH, so install works
+            send({ action: "install", script: "console.log('host script');", signature: "sig" });
+            const msg = await read();
+            assert.strictEqual(msg.data?.success, true, `Expected successful install, got: ${JSON.stringify(msg)}`);
+            // the ignored PATH must be explained in the log
+            const logContent = readFileSync(join(env.home, ".local", "log", "parcel-host.log"), "utf8");
+            assert.ok(logContent.includes("PATH is no longer a parcelrc option"), `Expected a PATH warning in the log, got: ${logContent}`);
+        } finally {
+            proc.kill();
+            env.cleanup();
+        }
+    });
+
+    test("rejects malformed recognised-key values in parcelrc", async () => {
+        for (const [key, value] of [
+            ["VALID_SIGNERS", "not-a-fingerprint"],
+            ["HOST_HASH", "abc123"],
+        ]) {
+            const env = createTestEnv();
+            const parcelrc = join(env.home, ".config", "parcel", "parcelrc");
+            const existing = readFileSync(parcelrc, "utf8");
+            writeFileSync(parcelrc, existing + `${key}="${value}"\n`);
+
+            const { proc, read } = spawnBootstrap(env);
+            try {
+                const msg = await read();
+                assert.ok(msg.error?.includes(key), `Expected ${key} error, got: ${JSON.stringify(msg)}`);
+                await new Promise((resolve) => proc.on("exit", resolve));
+                assert.ok(proc.exitCode !== 0, "Host should exit with non-zero status");
+            } finally {
+                if (!proc.killed) proc.kill();
+                env.cleanup();
+            }
+        }
+    });
+
+    test("honours a user-owned absolute GPG override via parcelrc", async () => {
+        const env = createTestEnv();
+        // Break the default-location mock gpg so that only the override works
+        chmodSync(env.mockGpgPath, 0o644);
+        const customGpg = join(env.bin, "custom-gpg");
+        writeFileSync(
+            customGpg,
+            `#!/bin/bash
+if [[ "$*" == *"--status-fd=1 --quiet --verify"* ]]; then
+    echo "[GNUPG:] VALIDSIG ${env.knownSigner} 2026-05-01 0 0 4 0 1 8 00 ${env.knownSigner}"
+    exit 0
+fi
+if [[ "$*" == *"--version"* ]]; then
+    echo "gpg (GnuPG) 2.5.0"
+    exit 0
+fi
+exit 1
+`,
+        );
+        chmodSync(customGpg, 0o755);
+        const parcelrc = join(env.home, ".config", "parcel", "parcelrc");
+        const existing = readFileSync(parcelrc, "utf8");
+        writeFileSync(parcelrc, existing + `GPG="${customGpg}"\n`);
+
+        const { proc, read, send } = spawnBootstrap(env);
+        try {
+            await read(); // bootstrap msg
+            send({ action: "install", script: "console.log('host script');", signature: "sig" });
+            const msg = await read();
+            assert.strictEqual(msg.data?.success, true, `Expected successful install via the GPG override, got: ${JSON.stringify(msg)}`);
+        } finally {
+            proc.kill();
+            env.cleanup();
+        }
+    });
+
+    test("rejects a GPG override that is not an executable file", async () => {
+        const env = createTestEnv();
+        const notExecutable = join(env.home, "not-executable");
+        writeFileSync(notExecutable, "not a program\n");
+        chmodSync(notExecutable, 0o644);
+        const parcelrc = join(env.home, ".config", "parcel", "parcelrc");
+        const existing = readFileSync(parcelrc, "utf8");
+        writeFileSync(parcelrc, existing + `GPG="${notExecutable}"\n`);
+
+        const { proc, read } = spawnBootstrap(env);
+        try {
+            const msg = await read();
+            assert.ok(msg.error?.includes("GPG"), `Expected GPG error, got: ${JSON.stringify(msg)}`);
+            await new Promise((resolve) => proc.on("exit", resolve));
+            assert.ok(proc.exitCode !== 0, "Host should exit with non-zero status");
+        } finally {
+            if (!proc.killed) proc.kill();
+            env.cleanup();
+        }
+    });
+
+    test("honours $HOME expansion in parcelrc path values", async () => {
+        const env = createTestEnv();
+        const parcelrc = join(env.home, ".config", "parcel", "parcelrc");
+        const existing = readFileSync(parcelrc, "utf8");
+        writeFileSync(parcelrc, existing + 'LOGFILE="$HOME/custom-log/parcel-host.log"\n');
+
+        const { proc, read } = spawnBootstrap(env);
+        try {
+            await read(); // bootstrap msg
+            assert.ok(existsSync(join(env.home, "custom-log", "parcel-host.log")), "LOGFILE beginning with $HOME should be honoured");
+        } finally {
+            proc.kill();
+            env.cleanup();
+        }
+    });
+
+    test("ignores config settings injected via the session environment", async () => {
+        const env = createTestEnv();
+        // If any of these environment values were honoured, install would fail:
+        // the fake GPG path does not exist, the injected signer list excludes the
+        // valid signer, the injected blacklist revokes it, and the hash is bogus.
+        const { proc, read, send } = spawnBootstrap(env, {
+            GPG: "/definitely/not/a/real/gpg",
+            VALID_SIGNERS: "DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF",
+            BLACKLIST_SIGNERS: env.knownSigner,
+            HOST_HASH: "nothex",
+        });
+        try {
+            const bootMsg = await read();
+            assert.strictEqual(
+                bootMsg.data?.action,
+                "bootstrap",
+                "Expected bootstrap despite injected env, got: " + JSON.stringify(bootMsg),
+            );
+            send({ action: "install", script: "console.log('host script');", signature: "sig" });
+            const msg = await read();
+            assert.strictEqual(msg.data?.success, true, `Expected successful install despite injected env, got: ${JSON.stringify(msg)}`);
+        } finally {
+            proc.kill();
+            env.cleanup();
+        }
+    });
+
+    test("respects PASSWORD_STORE_DIR from the session environment", async () => {
+        const env = createTestEnv();
+        // The fixture parcelrc sets a good PASSWORD_STORE_DIR; it must be removed so
+        // that the environment value is the only source.
+        const parcelrc = join(env.home, ".config", "parcel", "parcelrc");
+        const existing = readFileSync(parcelrc, "utf8");
+        writeFileSync(parcelrc, existing.replace(/^PASSWORD_STORE_DIR=.*$/m, ""));
+        const { proc, read, send } = spawnBootstrap(env, { PASSWORD_STORE_DIR: "/definitely/not/a/real/passdir" });
+        try {
+            await read(); // bootstrap msg
+            const mainScript = readFileSync("src/parcel-host", "utf8");
+            send({ action: "install", script: mainScript, signature: "sig" });
+            const installMsg = await read();
+            assert.strictEqual(installMsg.data?.success, true, `Expected successful install, got: ${JSON.stringify(installMsg)}`);
+            const msg = await read();
+            assert.ok(
+                msg.error?.includes("Invalid password store directory"),
+                `Expected the environment passdir to reach the main host, got: ${JSON.stringify(msg)}`,
+            );
+        } finally {
+            proc.kill();
+            env.cleanup();
+        }
+    });
+
+    test("ignores parcelrc values containing control characters", async () => {
+        const env = createTestEnv();
+        const parcelrc = join(env.home, ".config", "parcel", "parcelrc");
+        const existing = readFileSync(parcelrc, "utf8");
+        writeFileSync(parcelrc, existing + 'GPG="/definitely/not/a/real\tgpg"\n');
+
+        const { proc, read, send } = spawnBootstrap(env);
+        try {
+            await read(); // bootstrap msg
+            send({ action: "install", script: "console.log('host script');", signature: "sig" });
+            const msg = await read();
+            assert.strictEqual(msg.data?.success, true, `Expected successful install, got: ${JSON.stringify(msg)}`);
+            const logContent = readFileSync(join(env.home, ".local", "log", "parcel-host.log"), "utf8");
+            assert.ok(logContent.includes("ignoring unsafe value"), `Expected unsafe-value log entry, got: ${logContent}`);
+        } finally {
+            proc.kill();
+            env.cleanup();
+        }
+    });
+
+    test("accepts a $HOME-prefixed GPG binary override", async () => {
+        const env = createTestEnv();
+        const fakebin = join(env.home, "fakebin");
+        mkdirSync(fakebin);
+        const homeGpg = join(fakebin, "gpg");
+        writeFileSync(homeGpg, `#!/bin/bash\nexec "${env.mockGpgPath}" "$@"\n`);
+        chmodSync(homeGpg, 0o755);
+        const parcelrc = join(env.home, ".config", "parcel", "parcelrc");
+        writeFileSync(parcelrc, readFileSync(parcelrc, "utf8") + 'GPG="$HOME/fakebin/gpg"\n');
+
+        const { proc, read, send } = await installMainScript(env);
+        try {
+            send({ action: "list" });
+            const listMsg = await read();
+            assert.ok(Array.isArray(listMsg.data), `Expected the $HOME-prefixed gpg to work, got: ${JSON.stringify(listMsg)}`);
+        } finally {
+            proc.kill();
+            env.cleanup();
+        }
+    });
+
+    test("strict PATH filter drops caller-controlled directories without trusting stat", () => {
+        if (process.getuid?.() === 0) return; // meaningless as root: every directory is euid-owned/root-owned
+        const tmp = mkdtempSync(join(tmpdir(), "parcel-strict-"));
+        const ownedDir = join(tmp, "owned-locked");
+        try {
+            // Attacker setup: a user-owned directory locked at 0555 containing a fake
+            // stat (which always claims uid 0) and a fake gpg. The lock does not stop
+            // the owner from toggling write access later, so the dir must still go.
+            mkdirSync(ownedDir);
+            writeFileSync(join(ownedDir, "stat"), "#!/bin/bash\necho 0\n");
+            writeFileSync(join(ownedDir, "gpg"), "#!/bin/bash\necho shadowed\n");
+            chmodSync(join(ownedDir, "stat"), 0o555);
+            chmodSync(join(ownedDir, "gpg"), 0o555);
+            chmodSync(ownedDir, 0o555);
+
+            // Attacker setup: a caller-created symlink into a root-owned dir. All trust
+            // tests dereference it, so it passes ownership checks - but it can be
+            // retargeted after startup, so it must still go.
+            const linkDir = join(tmp, "linked");
+            symlinkSync("/usr/bin", linkDir);
+
+            const worldDir = join(tmp, "world-writable");
+            mkdirSync(worldDir);
+            chmodSync(worldDir, 0o777);
+
+            const res = spawnSync(
+                "bash",
+                [
+                    "--noprofile",
+                    "--norc",
+                    "-c",
+                    `${extractBootstrapFn("parcel_strict_filter_path")}\nparcel_strict_filter_path\nprintf 'FILTERED:%s\\n' "$PATH"`,
+                ],
+                { encoding: "utf8", env: { PATH: `${ownedDir}:${linkDir}:${worldDir}:/usr/bin:/bin` } },
+            );
+            assert.strictEqual(res.status, 0, `harness failed: ${res.stderr}`);
+            const kept = res.stdout
+                .trim()
+                .replace(/^FILTERED:/, "")
+                .split(":");
+            assert.ok(!kept.includes(ownedDir), "caller-owned 0555 dir must be dropped despite the lying fake stat");
+            assert.ok(!kept.includes(linkDir), "symlinked dir must be dropped despite resolving to /usr/bin");
+            assert.ok(!kept.includes(worldDir), "world-writable dir must be dropped");
+            assert.ok(kept.includes("/usr/bin"), `system dirs must be kept, got: ${kept}`);
+            // /bin is a merged-usr symlink on some distros; pass 1 must drop it then
+            if (lstatSync("/bin").isSymbolicLink()) {
+                assert.ok(!kept.includes("/bin"), "merged-usr /bin symlink must be dropped in pass 1");
+            } else {
+                assert.ok(kept.includes("/bin"), "real /bin must be kept in pass 1");
+            }
+        } finally {
+            if (existsSync(ownedDir)) chmodSync(ownedDir, 0o700); // unlock for deletion
+            rmSync(tmp, { recursive: true, force: true });
+        }
+    });
+
+    test("strict original-PATH sanitiser drops caller-owned symlinks but keeps system dirs", () => {
+        if (process.getuid?.() === 0) return; // meaningless as root: every element is euid-owned
+        const tmp = mkdtempSync(join(tmpdir(), "parcel-strict-"));
+        const ownedDir = join(tmp, "owned-dir");
+        try {
+            mkdirSync(ownedDir);
+            // Caller-controlled elements: a symlink into a root-owned dir, and a real dir.
+            const linkDir = join(tmp, "linked");
+            symlinkSync("/usr/bin", linkDir);
+            const worldDir = join(tmp, "world-writable");
+            mkdirSync(worldDir);
+            chmodSync(worldDir, 0o777);
+            const run = (originalPath) =>
+                spawnSync(
+                    "bash",
+                    [
+                        "--noprofile",
+                        "--norc",
+                        "-c",
+                        `${extractBootstrapFn("parcel_strict_sanitise_original_path")}
+ORIGINAL_PATH='${originalPath}'
+parcel_strict_sanitise_original_path
+printf 'FILTERED:%s\\n' "$PATH"`,
+                    ],
+                    // The harness PATH stands in for the pass-1 result: stat must resolve through it.
+                    { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } },
+                );
+            const kept = (r) =>
+                r.stdout
+                    .trim()
+                    .replace(/^FILTERED:/, "")
+                    .split(":");
+
+            const res = run(`${ownedDir}:${linkDir}:${worldDir}:/usr/bin:/bin`);
+            assert.strictEqual(res.status, 0, `harness failed: ${res.stderr}`);
+            assert.ok(!kept(res).includes(ownedDir), "caller-owned dir must be dropped");
+            assert.ok(!kept(res).includes(linkDir), "caller-owned symlink must be dropped despite a root-owned target");
+            assert.ok(!kept(res).includes(worldDir), "world-writable dir must be dropped");
+            assert.ok(kept(res).includes("/usr/bin") && kept(res).includes("/bin"), `system dirs must be kept: ${kept(res)}`);
+
+            // No PATH-resolvable stat: a pinned absolute stat must be used anyway (so the
+            // caller-owned symlink is still dropped); systems with no pinned stat fail
+            // closed by keeping the pass-1 result untouched.
+            const noStat = spawnSync(
+                "/bin/bash", // absolute: the harness PATH deliberately resolves nothing
+                [
+                    "--noprofile",
+                    "--norc",
+                    "-c",
+                    `${extractBootstrapFn("parcel_strict_sanitise_original_path")}
+ORIGINAL_PATH='${linkDir}:/usr/bin'
+parcel_strict_sanitise_original_path
+printf 'FILTERED:%s\\n' "$PATH"`,
+                ],
+                { encoding: "utf8", env: { PATH: "/nonexistent-no-stat" } },
+            );
+            assert.strictEqual(noStat.status, 0, `harness failed: ${noStat.stderr}`);
+            const pinnedStat = existsSync("/usr/bin/stat") || existsSync("/bin/stat");
+            assert.strictEqual(
+                noStat.stdout.trim(),
+                pinnedStat ? "FILTERED:/usr/bin" : "FILTERED:/nonexistent-no-stat",
+                "a pinned stat must sanitise despite the hostile PATH; otherwise fail closed",
+            );
+        } finally {
+            rmSync(tmp, { recursive: true, force: true });
+        }
+    });
+
+    test("strict binary check rejects caller-owned tools", () => {
+        if (process.getuid?.() === 0) return; // meaningless as root: everything is euid-owned
+        for (const [fixture, expected] of [
+            ["file", "owned by root"],
+            ["symlink", "caller-owned symlink"],
+        ]) {
+            const tmp = mkdtempSync(join(tmpdir(), "parcel-strict-"));
+            try {
+                let fakeGpg;
+                if (fixture === "symlink") {
+                    // Laundering attempt: caller-owned symlink resolving to a root-owned binary.
+                    fakeGpg = join(tmp, "gpg");
+                    symlinkSync("/bin/ls", fakeGpg);
+                } else {
+                    fakeGpg = join(tmp, "gpg");
+                    writeFileSync(fakeGpg, "#!/bin/bash\necho shadowed\n");
+                    chmodSync(fakeGpg, 0o555);
+                }
+                const harness = `STRICT_BINARIES=true
+function parcelrc_fatal() { printf 'FATAL:%s\\n' "$1"; exit 43; }
+${extractBootstrapFn("parcelrc_check_binary")}
+parcelrc_check_binary "parcelrc: GPG" "$FAKE"
+printf 'NOFATAL\\n'
+`;
+                const res = spawnSync("bash", ["--noprofile", "--norc", "-c", harness], {
+                    encoding: "utf8",
+                    env: { PATH: `${tmp}:/usr/bin:/bin`, FAKE: fakeGpg },
+                });
+                assert.strictEqual(res.status, 43, `expected fatal rejection, got rc=${res.status} out=${res.stdout}`);
+                assert.ok(res.stdout.includes(expected), `expected "${expected}" error, got: ${res.stdout}`);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        }
+    });
+
+    test("strict binary check rejects root-owned binaries in caller-writable directories", () => {
+        if (process.getuid?.() === 0) return; // meaningless as root: every directory writable check is distorted
+        const tmp = mkdtempSync(join(tmpdir(), "parcel-strict-"));
+        const harness = `STRICT_BINARIES=true
+function parcelrc_fatal() { printf 'FATAL:%s\\n' "$1"; exit 43; }
+${extractBootstrapFn("parcelrc_check_binary")}
+parcelrc_check_binary "parcelrc: GPG" "$FAKE"
+printf 'NOFATAL\\n'
+`;
+        try {
+            // A user-owned executable in a user-writable directory, laundered past the
+            // ownership gate by a lying stat (any stat output is uid 0).
+            const fakeDir = join(tmp, "fakebin");
+            const statDir = join(tmp, "statbin");
+            mkdirSync(fakeDir);
+            mkdirSync(statDir);
+            const fakeGpg = join(fakeDir, "gpg");
+            writeFileSync(fakeGpg, "#!/bin/bash\necho shadowed\n");
+            chmodSync(fakeGpg, 0o555);
+            writeFileSync(join(statDir, "stat"), "#!/bin/bash\necho 0\n");
+            chmodSync(join(statDir, "stat"), 0o755);
+
+            const res = spawnSync("bash", ["--noprofile", "--norc", "-c", harness], {
+                encoding: "utf8",
+                env: { PATH: `${statDir}:/usr/bin:/bin`, FAKE: fakeGpg },
+            });
+            assert.strictEqual(res.status, 43, `expected fatal rejection, got rc=${res.status} out=${res.stdout}`);
+            assert.ok(res.stdout.includes("directory writable by you"), `expected writable-directory error, got: ${res.stdout}`);
+
+            // Counter-check: a real root-owned binary in a non-writable directory passes.
+            const ok = spawnSync("bash", ["--noprofile", "--norc", "-c", harness], {
+                encoding: "utf8",
+                env: { PATH: "/usr/bin:/bin", FAKE: "/bin/ls" },
+            });
+            assert.strictEqual(ok.status, 0, `expected acceptance, got rc=${ok.status} out=${ok.stdout}`);
+            assert.ok(ok.stdout.includes("NOFATAL"), `expected acceptance, got: ${ok.stdout}`);
+        } finally {
+            rmSync(tmp, { recursive: true, force: true });
+        }
+    });
+
+    test("strict mode requires the bootstrap itself and its directory to be out of reach", () => {
+        if (process.getuid?.() === 0) return; // meaningless as root: everything is euid-owned
+        const tmp = mkdtempSync(join(tmpdir(), "parcel-strict-"));
+        try {
+            // The arg after -c becomes $0 inside the child; cwd is set separately
+            const run = (argv0, cwd) =>
+                spawnSync(
+                    "bash",
+                    [
+                        "--noprofile",
+                        "--norc",
+                        "-c",
+                        `${extractBootstrapFn("parcel_strict_mode_enabled")}\nparcel_strict_mode_enabled && printf 'STRICT\\n' || printf 'PERMISSIVE\\n'`,
+                        argv0,
+                    ],
+                    { encoding: "utf8", cwd },
+                ).stdout.trim();
+
+            // root-owned bootstrap in a non-writable directory
+            assert.strictEqual(run("/bin/ls", "/usr/bin"), "STRICT");
+            // user-owned bootstrap: permissive even in a locked directory
+            const owned = join(tmp, "owned-host");
+            writeFileSync(owned, "#!/bin/bash\nexit 0\n");
+            chmodSync(owned, 0o755);
+            chmodSync(tmp, 0o555);
+            assert.strictEqual(run(owned, tmp), "PERMISSIVE");
+            // root-owned bootstrap in a caller-writable directory: replaceable, so permissive
+            chmodSync(tmp, 0o755);
+            const linked = join(tmp, "linked-host");
+            symlinkSync("/bin/ls", linked);
+            assert.strictEqual(run(linked, tmp), "PERMISSIVE");
+        } finally {
+            chmodSync(tmp, 0o700);
+            rmSync(tmp, { recursive: true, force: true });
         }
     });
 });

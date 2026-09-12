@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
 # shellcheck disable=SC2155,SC1090
 set -e
 
@@ -18,9 +18,146 @@ set -e
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
+# WARNING: never spawn a bash child from this script or from the main host script.
+# Privileged mode never imports functions from the environment, but the raw
+# BASH_FUNC_* entries it leaves behind stay exported for the life of the process
+# (invalid names cannot be held or unset), and a bash child re-imports them as live
+# functions. No child of either host script may therefore be bash.
+
+# Re-exec into privileged mode to prevent shadowing. Cannot prevent shadowed exec.
+if [[ ! -o privileged ]]; then exec "$BASH" -p "$0" "$@"; fi
+
+# Sanitise load environment
+if [ -n "${BASH_ENV:-}" ] || [ -n "${LD_PRELOAD:-}" ] || [ -n "${LD_AUDIT:-}" ] || [ -n "${LD_LIBRARY_PATH:-}" ] ||
+   [ -n "${GCONV_PATH:-}" ] || [ -n "${DYLD_INSERT_LIBRARIES:-}" ] || [ -n "${DYLD_LIBRARY_PATH:-}" ] ||
+   [ -n "${DYLD_FALLBACK_LIBRARY_PATH:-}" ]; then
+    unset BASH_ENV LD_PRELOAD LD_AUDIT LD_LIBRARY_PATH GCONV_PATH \
+        DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH
+    exec "$0" "$@"
+fi
+
+# Whitelist-based environment cleanup. Keep vars needed for the Parcel host itself, and GPG
+# (pinentry etc) downstream requirements. Please open an issue if you need more than this.
+for PARCEL_ENV_VAR in $(compgen -e); do
+    case "$PARCEL_ENV_VAR" in
+        HOME|XDG_CONFIG_HOME|PATH|PASSWORD_STORE_DIR|GNUPGHOME) ;;
+        GPG_TTY|TERM|TERMINFO|TERMINFO_DIRS|DISPLAY|XAUTHORITY|WAYLAND_DISPLAY) ;;
+        XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS|GTK_IM_MODULE|QT_IM_MODULE|XMODIFIERS|PINENTRY_USER_DATA) ;;
+        PARCEL_*|STATE_LOCK_TIMEOUT) ;;
+        LANG|LC_*) ;;
+        *)
+            unset "$PARCEL_ENV_VAR" 2>/dev/null || true
+            ;;
+    esac
+done
+unset PARCEL_ENV_VAR
+
 TOKEN="broadcast"
 PARCEL_HOST=""
 BOOTSTRAP_VERSION="3"
+
+# Strict mode: the bootstrap is beyond the user's reach (not user-owned, directory not user-writable).
+# Builtin tests only (before PATH sanitisation); must remain one self-contained function: tests extract it verbatim.
+#
+# @since 1.0.7
+function parcel_strict_mode_enabled() {
+    local BOOTSTRAP_DIR="."
+    [[ "$0" == */* ]] && BOOTSTRAP_DIR="${0%/*}"
+    [ ! -O "$0" ] && [ ! -w "$BOOTSTRAP_DIR" ]
+}
+
+STRICT_BINARIES=false
+if parcel_strict_mode_enabled; then STRICT_BINARIES=true; fi
+
+# Save the invoker's PATH before any filtering: strict mode re-sanitises this original
+# value (rather than the pass-1 result) so that root-owned symlinks can be kept,
+# while permissive mode restores it untouched.
+ORIGINAL_PATH="$PATH"
+
+# Pass 1 of strict-mode PATH sanitisation: keep only absolute, root-owned, non-symlinked
+# directories that are not writable by the caller, using bash builtins only. Must remain a
+# single self-contained function: the test suite extracts it verbatim.
+#
+# @since 1.0.7
+function parcel_strict_filter_path() {
+    local FILTERED=""
+    local DIR OWNER
+    local -a PATH_ELEMENTS
+    IFS=':' read -ra PATH_ELEMENTS <<< "$PATH"
+    for DIR in "${PATH_ELEMENTS[@]}"; do
+        # keep the [ ] tests appended to the chain: some bracket-alternation chains hit a bash 3.2 parse quirk
+        if [[ "$DIR" == /* ]] && [ -d "$DIR" ] && [ ! -w "$DIR" ] && [ ! -O "$DIR" ] && [ ! -L "$DIR" ]; then
+            FILTERED+="${FILTERED:+:}$DIR"
+        fi
+    done
+    PATH="$FILTERED"
+    hash -r
+    if [ -n "$PATH" ]; then
+        local STAT="" STAT_CANDIDATE
+        for STAT_CANDIDATE in /usr/bin/stat /bin/stat; do
+            if [ -x "$STAT_CANDIDATE" ]; then STAT="$STAT_CANDIDATE"; break; fi
+        done
+        # residual: on systems with no pinned stat, a PATH-resolved stat could be
+        # shadowed by a directory owned by a second attacker-controlled uid
+        [ -n "$STAT" ] || STAT="stat"
+        FILTERED=""
+        IFS=':' read -ra PATH_ELEMENTS <<< "$PATH"
+        for DIR in "${PATH_ELEMENTS[@]}"; do
+            OWNER="$("$STAT" -L -c %u "$DIR" 2>/dev/null || "$STAT" -L -f %u "$DIR" 2>/dev/null)" || OWNER=""
+            if [ "$OWNER" = "0" ]; then
+                FILTERED+="${FILTERED:+:}$DIR"
+            fi
+        done
+        PATH="$FILTERED"
+        hash -r
+    fi
+}
+
+# Pass 2 of strict-mode PATH sanitisation: re-filter the invoker's original PATH, keeping
+# only elements whose link and target are both root-owned and not writable by the caller.
+# Must remain a single self-contained function: the test suite extracts it verbatim.
+#
+# @since 1.0.7
+function parcel_strict_sanitise_original_path() {
+    local STAT="" STAT_CANDIDATE
+    for STAT_CANDIDATE in /usr/bin/stat /bin/stat; do
+        if [ -x "$STAT_CANDIDATE" ]; then STAT="$STAT_CANDIDATE"; break; fi
+    done
+    if [ -z "$STAT" ]; then
+        # residual: a PATH-resolved stat could be shadowed by a directory owned by a second attacker-controlled uid
+        # no sane Linux / POSIX system lacks a stat in /usr:/usr/bin, so this is acceptable
+        command -v stat >/dev/null 2>&1 || return 0
+        STAT="stat"
+    fi
+    local FILTERED=""
+    local DIR LINK_OWNER TARGET_OWNER
+    local -a PATH_ELEMENTS
+    IFS=':' read -ra PATH_ELEMENTS <<< "$ORIGINAL_PATH"
+    for DIR in "${PATH_ELEMENTS[@]}"; do
+        # keep the [ ] tests appended to the chain: some bracket-alternation chains hit a bash 3.2 parse quirk
+        # -w and -d dereference symlinks, so they judge the target; stat without -L judges the link itself
+        if [[ "$DIR" == /* ]] && [ -d "$DIR" ] && [ ! -w "$DIR" ]; then
+            LINK_OWNER="$("$STAT" -c %u "$DIR" 2>/dev/null || "$STAT" -f %u "$DIR" 2>/dev/null)" || LINK_OWNER=""
+            TARGET_OWNER="$("$STAT" -L -c %u "$DIR" 2>/dev/null || "$STAT" -L -f %u "$DIR" 2>/dev/null)" || TARGET_OWNER=""
+            if [ "$LINK_OWNER" = "0" ] && [ "$TARGET_OWNER" = "0" ]; then
+                FILTERED+="${FILTERED:+:}$DIR"
+            fi
+        fi
+    done
+    PATH="$FILTERED"
+    hash -r
+}
+
+# Pass 1 runs in every mode: it guarantees that any tool resolved while deciding or
+# enforcing mode (e.g. ownership checks) cannot be shadowed. Permissive mode then
+# restores the invoker's original PATH, including caller-controlled elements.
+parcel_strict_filter_path
+if $STRICT_BINARIES; then
+    parcel_strict_sanitise_original_path
+else
+    PATH="$ORIGINAL_PATH"
+    hash -r
+fi
 
 # transmit message in native messaging host protocol
 function parcel_transmit() {
@@ -48,16 +185,17 @@ PARCELRC="$CONFIG_DIR/parcelrc"
 if [ ! -e "$PARCELRC" ]; then
     mkdir -p "$(dirname "$PARCELRC")"
     cat > "$PARCELRC" <<EOT
-# This file was automatically generated by the parcel-host bootstrap script
+# This file was automatically generated by the parcel-host bootstrap script.
+#
+# When the bootstrap host is installed system-wide (owned by root rather than by you),
+# the binary path overrides below (GPG/JQ/OPENSSL) must resolve to root-owned binaries
+# in directories you cannot write to.
 
 # Valid signers for the main host script which is bundled with the extension (space-separated)
 #VALID_SIGNERS="88FF14D6294AF4036B7F00FF676A3C09E2E47A72 56C3E775E72B0C8B1C0C1BD0B5DB77409B11B601 82ED663067C6017BAA4BC752EB670BF2B1131683 B0908ED59A96C9882BED9A942A51761511A30253"
 
 # Signers to revoke even if valid (space-separated, primary or subkey fingerprint)
 #BLACKLIST_SIGNERS=""
-
-# If you use MacOS, you may wish to include homebrew's bin directory in parcel's PATH
-#PATH="\$PATH:/opt/homebrew/bin"
 
 # The gpg binary to use.
 # Default: gpg
@@ -96,15 +234,243 @@ if [ "$PARCELRC" != "$(find "$PARCELRC" -maxdepth 1 -type f -perm 0600 2>/dev/nu
     exit 1
 fi
 
-# load startup config & set up dedicated logging
+# Environment copies of recognised keys must not flow in: the browser hands the host
+# its full session environment, and only validated parcelrc content may set these.
+# PASSWORD_STORE_DIR is the exception, as setting it in the session environment is
+# legitimate and longstanding for pass users.
+unset VALID_SIGNERS BLACKLIST_SIGNERS GPG JQ OPENSSL LOGFILE STATEFILE HOST_HASH
+
+# default paths; parcelrc may override them
 LOGFILE="$HOME/.local/log/parcel-host.log"
 # shellcheck disable=SC2034 # consumed by the evaluated main host script
-PASSWORD_STORE_DIR="$HOME/.password-store"
-. "$PARCELRC"
+PASSWORD_STORE_DIR="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
+
+# a signer fingerprint is exactly 40 or 64 hex characters
+FPR_PATTERN='[0-9A-Fa-f]{40}([0-9A-Fa-f]{24})?'
+FPR_RE="^${FPR_PATTERN}$"
+# a well-formed blacklist value: empty or space-separated fingerprints
+BLACKLIST_VALUE_RE="^(${FPR_PATTERN}( ${FPR_PATTERN})*)?$"
+
+# findings collected while reading parcelrc, flushed to the log once it is open
+PARCELRC_NOTES=""
+
+# Buffer a parcelrc review note, flushed to the logfile once it is open.
+#
+# $1: note text
+# @since 1.0.7
+function parcelrc_note() {
+    PARCELRC_NOTES+="[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] $1"$'\n'
+}
+
+# Report a fatal startup problem to the extension and abort. Uses static message text
+# with a caller-supplied context prefix, as jq is not yet known to be available this
+# early in startup; control characters, double quotes and backslashes are stripped.
+#
+# $1: error message
+# @return never returns
+# @since 1.0.7
+function parcelrc_fatal() {
+    local MSG="$1"
+    MSG="${MSG//[[:cntrl:]]/}"
+    MSG="${MSG//\"/}"
+    MSG="${MSG//\\/}"
+    parcel_transmit '{"token": "broadcast", "error": "'"$MSG"'"}'
+    exit 1
+}
+
+# Check a binary value: either a bare command name (resolved via the inherited PATH) or
+# an absolute path to an existing, executable regular file. In strict mode the resolved
+# file must additionally be owned by root and not writable by the caller, and if the
+# override is itself a symlink, the link must be root-owned too.
+#
+# $1: label naming the tool and its source, e.g. "parcelrc GPG setting" or "bootstrap gpg default"
+# $2: value to check
+# @return 0 if usable; reports a fatal error and exits otherwise
+# @since 1.0.7
+function parcelrc_check_binary() {
+    local KEY="$1" VALUE="$2" TARGET
+    if [[ "$VALUE" == /* ]]; then
+        TARGET="$VALUE"
+    elif [[ "$VALUE" =~ ^[A-Za-z0-9+._-]+$ ]]; then
+        if ! $STRICT_BINARIES; then return 0; fi
+        TARGET="$(command -v "$VALUE")" || parcelrc_fatal "$KEY: cannot resolve command name $VALUE"
+    else
+        parcelrc_fatal "$KEY: must be a command name or an absolute path"
+    fi
+    if [ ! -f "$TARGET" ] || [ ! -x "$TARGET" ]; then
+        parcelrc_fatal "$KEY: $TARGET is not an executable file"
+    fi
+    if $STRICT_BINARIES; then
+        local OWNER LINK_OWNER
+        OWNER="$(stat -L -c %u "$TARGET" 2>/dev/null || stat -L -f %u "$TARGET")"
+        if [ "$OWNER" != "0" ] || [ -w "$TARGET" ]; then
+            parcelrc_fatal "$KEY: $TARGET must be owned by root and not writable by you (the bootstrap host is installed system-wide)"
+        fi
+        # stat -L dereferences symlinks, so a caller-owned symlink to a root-owned binary
+        # would pass the check above and could be repointed after startup; require the
+        # link itself to be root-owned (stat without -L judges the link)
+        if [ -L "$TARGET" ]; then
+            LINK_OWNER="$(stat -c %u "$TARGET" 2>/dev/null || stat -f %u "$TARGET")"
+            if [ "$LINK_OWNER" != "0" ]; then
+                parcelrc_fatal "$KEY: $TARGET must be owned by root, not a caller-owned symlink (the bootstrap host is installed system-wide)"
+            fi
+            # resolve the whole link chain: a root-owned link pointing into a
+            # caller-writable directory can be swapped by replacing its pointee,
+            # so the final target's directory must be out of reach too
+            local RESOLVED NEXT HOPS
+            RESOLVED="$TARGET"
+            HOPS=0
+            while [ -L "$RESOLVED" ]; do
+                # mirrors the kernel's 40-link resolution limit; only reachable
+                # if the chain changed after the [ -f ] test above
+                HOPS=$((HOPS + 1))
+                if [ "$HOPS" -gt 40 ]; then
+                    parcelrc_fatal "$KEY: cannot resolve $TARGET (symlink chain too long or cyclic)"
+                fi
+                NEXT="$(readlink "$RESOLVED")" || parcelrc_fatal "$KEY: cannot resolve $TARGET"
+                case "$NEXT" in
+                    /*) RESOLVED="$NEXT" ;;
+                    *) RESOLVED="${RESOLVED%/*}/$NEXT" ;;
+                esac
+            done
+            local RESOLVED_DIR="${RESOLVED%/*}"
+            [ -n "$RESOLVED_DIR" ] || RESOLVED_DIR="/"
+            if [ -w "$RESOLVED_DIR" ]; then
+                parcelrc_fatal "$KEY: $TARGET resolves into a directory writable by you (the bootstrap host is installed system-wide)"
+            fi
+        fi
+        # a caller-writable directory allows the binary to be swapped via rename
+        # after startup even when the file itself is root-owned and read-only
+        local TARGET_DIR="${TARGET%/*}"
+        [ -n "$TARGET_DIR" ] || TARGET_DIR="/"
+        if [ -w "$TARGET_DIR" ]; then
+            parcelrc_fatal "$KEY: $TARGET is in a directory writable by you (the bootstrap host is installed system-wide)"
+        fi
+    fi
+    return 0
+}
+
+# Validate one recognised parcelrc setting and stage it for application. Unknown keys
+# are ignored so that newer parcelrc options remain forward-compatible with older
+# bootstrap versions; empty values mean "keep the default".
+#
+# $1: key, $2: value
+# @return 0 if staged for application, 1 if ignored
+# @since 1.0.7
+function parcelrc_apply() {
+    local KEY="$1" VALUE="$2"
+    [ -n "$VALUE" ] || return 1
+    case "$KEY" in
+        VALID_SIGNERS)
+            [[ "$VALUE" =~ ^${FPR_PATTERN}( ${FPR_PATTERN})*$ ]] ||
+                parcelrc_fatal "VALID_SIGNERS must be a space-separated list of key fingerprints"
+            ;;
+        BLACKLIST_SIGNERS)
+            if [[ ! "$VALUE" =~ $BLACKLIST_VALUE_RE ]]; then
+                parcelrc_note "BLACKLIST_SIGNERS is malformed; ignoring it"
+                return 1
+            fi
+            ;;
+        HOST_HASH)
+            [[ "$VALUE" =~ ^[0-9A-Fa-f]{64}$ ]] ||
+                parcelrc_fatal "HOST_HASH must be a 64-character hex sha256 hash"
+            ;;
+        LOGFILE | STATEFILE | PASSWORD_STORE_DIR)
+            case "$VALUE" in
+                /* | \$HOME | \$HOME/* | \$\{HOME\} | \$\{HOME\}/*) ;;
+                *)
+                    parcelrc_note "$KEY must be an absolute path (or begin with \$HOME); ignoring it"
+                    return 1
+                    ;;
+            esac
+            ;;
+        GPG | JQ | OPENSSL)
+            # check the expanded value; the staged line keeps the $HOME token for eval
+            local EXPANDED="${VALUE//\$\{HOME\}/$HOME}"
+            EXPANDED="${EXPANDED//\$HOME/$HOME}"
+            parcelrc_check_binary "parcelrc $KEY setting" "$EXPANDED"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+    PARCELRC_SANITISED+="${KEY}=\"${VALUE}\""$'\n'
+    return 0
+}
+
+# Load startup config from parcelrc. The file is read into memory and each line is
+# validated against a strict whitelist (comments, blank lines, or canonical
+# KEY="value" for a recognised key); only those validated assignments are then eval'd,
+# which preserves $HOME expansion in values without executing arbitrary content.
+#
+# @since 1.0.7
+function load_parcelrc() {
+    local CONTENT LINE NAME VALUE STRIPPED
+    local N=0
+    local ASSIGN_RE='^([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"$'
+    local HOMEVAR_RE='[$]HOME[A-Za-z0-9_]'
+    PARCELRC_SANITISED=""
+    CONTENT="$(head -c 1048576 "$PARCELRC")" || parcelrc_fatal "unable to read $PARCELRC"
+    while IFS= read -r LINE || [ -n "$LINE" ]; do
+        N=$((N + 1))
+        [[ "$LINE" =~ ^[[:space:]]*$ ]] && continue
+        [[ "$LINE" =~ ^[[:space:]]*# ]] && continue
+        if [[ ! "$LINE" =~ $ASSIGN_RE ]]; then
+            parcelrc_note "ignoring unrecognised content at line $N"
+            continue
+        fi
+        NAME="${BASH_REMATCH[1]}"
+        VALUE="${BASH_REMATCH[2]}"
+        # PATH was a documented option before the whitelist parser; warn on its
+        # removal rather than ignoring the line without explanation
+        if [ "$NAME" = "PATH" ]; then
+            parcelrc_note "PATH is no longer a parcelrc option; ignoring it (set GPG/JQ/OPENSSL to a command name or absolute path instead)"
+            continue
+        fi
+        # values may not contain backticks, backslashes or control characters, and the
+        # only permitted expansion tokens are $HOME and ${HOME}
+        # shellcheck disable=SC1003 # the single-quoted backtick pattern is intentional
+        case "$VALUE" in
+            *'`'* | *'\'* | *[[:cntrl:]]*)
+                parcelrc_note "ignoring unsafe value at line $N"
+                continue
+                ;;
+        esac
+        STRIPPED="${VALUE//\$\{HOME\}/}"
+        if [[ "$STRIPPED" =~ $HOMEVAR_RE ]]; then
+            parcelrc_note "ignoring unsafe value at line $N"
+            continue
+        fi
+        STRIPPED="${STRIPPED//\$HOME/}"
+        if [[ "$STRIPPED" == *'$'* ]]; then
+            parcelrc_note "ignoring unsafe value at line $N"
+            continue
+        fi
+        # ignored settings return 1; do not let that abort the load
+        parcelrc_apply "$NAME" "$VALUE" || true
+    done <<< "$CONTENT"
+    eval "$PARCELRC_SANITISED"
+    unset PARCELRC_SANITISED
+}
+
+load_parcelrc
+
+# In strict mode, check the effective binary for every tool (parcelrc override or the
+# bare-name default resolved via the sanitised PATH) against the ownership bar.
+if $STRICT_BINARIES; then
+    for TOOL in gpg jq openssl; do
+        VAR="$(tr '[:lower:]' '[:upper:]' <<< "$TOOL")"
+        parcelrc_check_binary "bootstrap $TOOL default" "${!VAR:-$TOOL}"
+    done
+    unset TOOL VAR
+fi
+
 mkdir -p "$(dirname "$LOGFILE")"
 exec 5>>"$LOGFILE"
 exec 2>&5
 chmod 0600 "$LOGFILE"
+if [ -n "$PARCELRC_NOTES" ]; then printf '%s' "$PARCELRC_NOTES" >&5; fi
+unset PARCELRC_NOTES
 if [ -z "$VALID_SIGNERS" ]; then VALID_SIGNERS="88FF14D6294AF4036B7F00FF676A3C09E2E47A72 56C3E775E72B0C8B1C0C1BD0B5DB77409B11B601 82ED663067C6017BAA4BC752EB670BF2B1131683 B0908ED59A96C9882BED9A942A51761511A30253"; fi
 
 # GPG emits uppercase fingerprints; normalise config lists so comparisons match exactly
@@ -112,12 +478,6 @@ VALID_SIGNERS="$(tr '[:lower:]' '[:upper:]' <<< "$VALID_SIGNERS")"
 
 # resolve the state file (also overridable via parcelrc)
 STATEFILE="${STATEFILE:-$CONFIG_DIR/state}"
-
-# a signer fingerprint is exactly 40 or 64 hex characters
-FPR_PATTERN='[0-9A-Fa-f]{40}([0-9A-Fa-f]{24})?'
-FPR_RE="^${FPR_PATTERN}$"
-# a well-formed blacklist value: empty or space-separated fingerprints
-BLACKLIST_VALUE_RE="^(${FPR_PATTERN}( ${FPR_PATTERN})*)?$"
 
 # capture the parcelrc blacklist separately so the state-file list can be
 # combined with it rather than clobbered

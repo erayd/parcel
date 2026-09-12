@@ -14,7 +14,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { sourceScript, makeTempHome, writeMockBin } from "./harness.js";
@@ -74,6 +74,110 @@ test("detect_single_tool_path respects priority and clobbers broken values", () 
         // 5. Nothing found (no default, no PATH hit, no mac fallback) leaves CUST empty.
         const none = detectOne(bin, "parcel-no-such-tool", "", NOENT, { home, yes: true });
         assert.strictEqual(none.stdout, "c|f", "no working tool must leave CUST untouched");
+    } finally {
+        cleanup();
+    }
+});
+
+/** Verifies tool_acceptable mirrors the bootstrap's strict-mode binary rules. */
+test("tool_acceptable rejects user-owned binaries on system installs", () => {
+    const { home, cleanup } = makeTempHome();
+    try {
+        const bin = join(home, "bin");
+        const gpg = writeMockBin(bin, "gpg", "exit 0");
+        const env = { env: { HOME: home } };
+        const acceptable = (level, path) => sourceScript(`INSTALL_LEVEL="${level}"\ntool_acceptable '${path}'`, env).code === 0;
+
+        assert.ok(acceptable("user", gpg), "user-level install must accept a user-owned binary");
+        assert.ok(!acceptable("system", gpg), "system install must reject a user-owned binary");
+        assert.ok(acceptable("system", "/bin/ls"), "system install must accept a root-owned system binary");
+        assert.ok(!acceptable("user", NOENT), "missing paths are never acceptable");
+    } finally {
+        cleanup();
+    }
+});
+
+/** Verifies tool_acceptable also rejects binaries in user-writable directories. */
+test("tool_acceptable rejects root-owned binaries in writable directories on system installs", () => {
+    if (process.getuid?.() === 0) return; // as root the /022 heuristic cannot see owner-only write bits
+    const { home, cleanup } = makeTempHome();
+    try {
+        const bin = join(home, "bin");
+        const gpg = writeMockBin(bin, "gpg", "exit 0");
+        chmodSync(gpg, 0o555);
+        // A lying stat (any stat output is uid 0) launders the fixture past the
+        // ownership gate so the directory rejection is exercised in isolation.
+        const statDir = join(home, "statbin");
+        writeMockBin(statDir, "stat", "echo 0");
+        const env = { env: { HOME: home, PATH: `${statDir}:${process.env.PATH ?? ""}` } };
+        const acceptable = (level, path) => sourceScript(`INSTALL_LEVEL="${level}"\ntool_acceptable '${path}'`, env).code === 0;
+
+        assert.ok(acceptable("system", "/bin/ls"), "root-owned binary in a non-writable dir stays acceptable");
+        assert.ok(!acceptable("system", gpg), "system install must reject a binary whose directory is user-writable");
+        assert.ok(acceptable("user", gpg), "user-level install must accept the same binary");
+    } finally {
+        cleanup();
+    }
+});
+
+/** Verifies warn_nonroot_tools validates the paths detection accepted, not re-resolved USER_PATH lookups. */
+test("warn_nonroot_tools validates the accepted path instead of re-resolving it via USER_PATH", () => {
+    if (process.getuid?.() === 0) return; // ownership semantics are distorted as root
+    const { home, cleanup } = makeTempHome();
+    try {
+        const bin = join(home, "bin");
+        writeMockBin(bin, "gpg", "exit 0");
+        // detection accepts the root-owned default, so a user-owned gpg earlier in
+        // USER_PATH must not produce a strict-mode warning the bootstrap can never hit
+        const res = sourceScript(
+            `YES=true
+INSTALL_LEVEL=system
+CUSTOM_GPG=""
+CUSTOM_JQ=""
+CUSTOM_OPENSSL=""
+detect_single_tool_path gpg '' /bin/ls CUSTOM_GPG FORCE_GPG
+warn_nonroot_tools`,
+            { env: { PATH: `${bin}:${process.env.PATH}`, USER_PATH: bin, HOME: home } },
+        );
+        assert.strictEqual(res.code, 0, `run failed (stderr:\n${res.stderr})`);
+        assert.ok(!res.stderr.includes("GPG ("), `must not warn about the unaccepted USER_PATH entry, got:\n${res.stderr}`);
+        assert.ok(res.stderr.includes("No acceptable jq binary was found"), `expected a missing-jq warning, got:\n${res.stderr}`);
+        assert.ok(res.stderr.includes("No acceptable openssl binary was found"), `expected a missing-openssl warning, got:\n${res.stderr}`);
+
+        // an effective path that fails the strict-mode bar is still called out
+        const strict = sourceScript(
+            `INSTALL_LEVEL=system
+CUSTOM_GPG=""
+CUSTOM_JQ=""
+CUSTOM_OPENSSL=""
+EFFECTIVE_GPG="${join(bin, "gpg")}"
+warn_nonroot_tools`,
+            { env: { HOME: home } },
+        );
+        assert.strictEqual(strict.code, 0, `run failed (stderr:\n${strict.stderr})`);
+        assert.ok(strict.stderr.includes("is not root-owned"), `expected a strict-mode warning, got:\n${strict.stderr}`);
+    } finally {
+        cleanup();
+    }
+});
+
+/** Verifies $HOME-prefixed parcelrc values are left in place and recorded expanded. */
+test("detect_single_tool_path respects a $HOME-prefixed parcelrc value", () => {
+    const { home, cleanup } = makeTempHome();
+    try {
+        const bin = join(home, "fakebin");
+        const gpg = writeMockBin(bin, "gpg", "exit 0");
+        for (const form of ["$HOME", "${HOME}"]) {
+            const res = sourceScript(
+                `INSTALL_LEVEL=user
+CUST="c"; FORCE="f"
+detect_single_tool_path gpg '${form}/fakebin/gpg' '${NOENT}' CUST FORCE
+printf '%s|%s|%s' "$CUST" "$FORCE" "$EFFECTIVE_GPG"`,
+                { env: { HOME: home } },
+            );
+            assert.strictEqual(res.code, 0, `run failed (stderr:\n${res.stderr})`);
+            assert.strictEqual(res.stdout, `c|f|${gpg}`, "a usable $HOME-prefixed value must be left alone and recorded expanded");
+        }
     } finally {
         cleanup();
     }
