@@ -94,6 +94,67 @@
     });
     let frameId = 0;
 
+    /**
+     * Tell the root frame this frame's ID so its iframe mapping stays fresh for popup placement.
+     * @since 1.0.8
+     * @param {number} id - The frame ID to broadcast.
+     * @returns {void}
+     */
+    function broadcastFrameId(id) {
+        if (window === window.top) return;
+        // Restrict the broadcast to the top-level origin so a cross-origin embedding page can't
+        // observe it. ancestorOrigins exposes ancestor origins even cross-origin; fall back to "*"
+        // in browsers that don't implement it.
+        const ancestors = location.ancestorOrigins;
+        const topOrigin = ancestors?.length ? ancestors.item(ancestors.length - 1) : "*";
+        window.top.postMessage({ action: "parcel-frame-id", frameId: id }, topOrigin);
+    }
+
+    /**
+     * Re-resolve `frameId` from the background worker; Chrome prerender
+     * activation changes the ID after document_start (issue #163).
+     * @since 1.0.8
+     * @returns {Promise<number>} The (possibly unchanged) current frame ID.
+     */
+    async function resolveFrameId() {
+        let port;
+        try {
+            port = chrome.runtime.connect({ name: "integration" });
+        } catch (_err) {
+            // Extension context invalidated - the stale content script cannot recover anyway.
+            return frameId;
+        }
+        return new Promise((resolve) => {
+            // keep the cached ID if the worker never answers this click-time query
+            const timer = setTimeout(() => {
+                port.disconnect();
+                resolve(frameId);
+            }, 1_000);
+            port.onMessage.addListener((msg) => {
+                if (msg?.action !== "frame-id") return;
+                clearTimeout(timer);
+                if (typeof msg.frameId === "number" && msg.frameId !== frameId) {
+                    frameId = msg.frameId;
+                    // refresh the root frame's iframe mapping for popup placement
+                    broadcastFrameId(frameId);
+                }
+                port.disconnect();
+                resolve(frameId);
+            });
+            port.onDisconnect.addListener(() => {
+                chrome.runtime.lastError; // consume the disconnect error
+                clearTimeout(timer);
+                resolve(frameId);
+            });
+            port.postMessage({ action: "frame-id" });
+        });
+    }
+
+    // Re-resolve immediately on prerender activation (issue #163); self-gating where prerendering is unsupported.
+    if (document.prerendering) {
+        document.addEventListener("prerenderingchange", () => resolveFrameId(), { once: true });
+    }
+
     // Send a periodic keepalive message to the service worker so that MV3
     // doesn't suspend it during idle periods. Content scripts run in the tab's
     // process and are not subject to service worker suspension, so this timer
@@ -182,6 +243,8 @@
     window.addEventListener("pageshow", (ev) => {
         // re-establish connection to the trigger port on bfcache restore
         if (ev.persisted) triggerPort.reconnect();
+        // re-resolve the frame ID in case the restored frame was assigned a different ID
+        if (ev.persisted) resolveFrameId();
         // re-assert the stashed-error badge for the restored document (top frame owns the stash)
         if (ev.persisted && window === window.top) reportStashPresence(Boolean(document._parcelError));
     });
@@ -249,15 +312,7 @@
                     // already disconnected; nothing to clean up
                 }
                 frameId = msg?.frameId || 0;
-                if (window !== window.top) {
-                    // Restrict the broadcast to the top-level origin so a
-                    // cross-origin embedding page can't observe it. ancestorOrigins
-                    // exposes ancestor origins even cross-origin; fall back to "*"
-                    // in browsers that don't implement it.
-                    const ancestors = location.ancestorOrigins;
-                    const topOrigin = ancestors?.length ? ancestors.item(ancestors.length - 1) : "*";
-                    window.top.postMessage({ action: "parcel-frame-id", frameId }, topOrigin);
-                }
+                broadcastFrameId(frameId);
                 resolve(msg.config);
             });
             port.onDisconnect.addListener(() => {
@@ -810,6 +865,7 @@
         if (target?.control) return; // ignore clicks on labels, we'll handle them via the cascaded click on its associated element
         if (target._lastClicked && target._lastClicked > Date.now() - 350) return; // debounce multiple quick clicks
         target._lastClicked = Date.now();
+        await resolveFrameId(); // refresh: prerender activation can swap frame IDs (issue #163)
 
         try {
             const targetInfo = await getTargetInfo(target);
@@ -1289,7 +1345,7 @@
                 // fallback for browsers without crypto.randomUUID()
                 token = Math.random().toString(36).substring(2) + Date.now().toString(36);
             }
-            passkeyBindings[token] = {
+            const binding = {
                 requestId: req.requestId,
                 op: req.op,
                 origin,
@@ -1302,6 +1358,9 @@
                 hintWarning: violatedPasskeyHints(req.options.hints),
                 minted: null,
             };
+            passkeyBindings[token] = binding;
+            await resolveFrameId(); // refresh: prerender activation can swap frame IDs (issue #163)
+            if (passkeyBindings[token] !== binding) return; // aborted or superseded while refreshing
             authPort.postMessage(token);
             triggerPort.postMessage({ action: "trigger-popup", frameId, token, position: { centered: true }, mode: "passkey" });
         } catch (err) {
@@ -1389,9 +1448,12 @@
         } catch (_err) {
             token = Math.random().toString(36).substring(2) + Date.now().toString(36);
         }
-        passkeyBindings[token] = { conflict: true, reason: msg.reason, origin };
+        const binding = { conflict: true, reason: msg.reason, origin };
+        passkeyBindings[token] = binding;
         passkeyConflictShown = true;
         // announce the popup token before the iframe connects, like a ceremony binding does
+        await resolveFrameId(); // refresh: prerender activation can swap frame IDs (issue #163)
+        if (passkeyBindings[token] !== binding) return; // superseded while refreshing
         authPort.postMessage(token);
         triggerPort.postMessage({ action: "trigger-popup", frameId, token, position: { centered: true }, mode: "passkey-conflict" });
     }

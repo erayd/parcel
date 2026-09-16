@@ -99,6 +99,9 @@ let dom, document, window, mock, portReceivers, portCallers;
 
 // Stash reports sent from the content script to the worker ({type: "parcel-error-stash", ...}).
 const stashReports = [];
+
+// Frame ID the mock worker reports for live frame-id queries (issue #163 emulation).
+let liveFrameId = 0;
 // Snapshot of the reports produced during module init (before any test truncates them).
 let initStashReports = [];
 
@@ -183,6 +186,8 @@ before(async () => {
         receiver.onMessage.addListener((msg) => {
             if (msg?.action === "config") {
                 receiver.postMessage({ action: "config", config: makeValidConfig(), frameId: 0 });
+            } else if (msg?.action === "frame-id") {
+                receiver.postMessage({ action: "frame-id", frameId: liveFrameId });
             }
         });
     });
@@ -323,6 +328,30 @@ describe("Integration script", { concurrency: false }, () => {
         await click(input);
         await promise;
         assert.ok(input._parcelToken);
+    });
+
+    test("trigger-popup re-resolves the frame ID from the worker (prerender activation, issue #163)", async () => {
+        clearBody();
+        liveFrameId = 42; // config-time frameId was 0; simulate a post-activation swap
+        try {
+            const input = makeInput({ type: "text", name: "username" });
+            const popupPromise = nextMessage(portReceivers["trigger"], "trigger-popup", 3000);
+            await click(input);
+            const trigger = await popupPromise;
+            assert.strictEqual(trigger.frameId, 42, "must dispatch the live frame ID, not the stale config-time value");
+
+            // untargeted clicks use the same refreshed ID
+            const clickPromise = nextMessage(portReceivers["trigger"], "untargeted-click", 3000);
+            const div = document.createElement("div");
+            document.body.appendChild(div);
+            await click(div);
+            const untargeted = await clickPromise;
+            assert.strictEqual(untargeted.frameId, 42, "untargeted-click must also carry the live frame ID");
+        } finally {
+            // The content script's stale frameId self-heals on next use; a cleanup click
+            // would be buffered by the mock and replayed to the next test.
+            liveFrameId = 0;
+        }
     });
 
     test("click on untargeted div sends untargeted-click", async () => {
