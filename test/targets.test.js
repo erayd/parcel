@@ -47,8 +47,12 @@ describe("Default targets", () => {
         const config = { targets: defaultTargets };
         // a regular password entry must not hoist the secret as a card
         assert.strictEqual(await new Plaintext("supersecretpassword\nlogin: user@example.com", config).getValue("card"), null);
+        // a numeric password of plausible card length must not hoist without a valid Luhn checksum
+        assert.strictEqual(await new Plaintext("1234567812345671\nlogin: user@example.com", config).getValue("card"), null);
         // a naked card-number top line still resolves
         assert.strictEqual(await new Plaintext("4111111111111111\nholder: alice", config).getValue("card"), "4111111111111111");
+        // grouped formats still resolve
+        assert.strictEqual(await new Plaintext("4111-1111-1111-1111\nholder: alice", config).getValue("card"), "4111-1111-1111-1111");
     });
 
     test("non-card targets default to class 'login'", () => {

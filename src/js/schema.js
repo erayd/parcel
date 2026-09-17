@@ -219,7 +219,7 @@ export const TargetSchema = {
         pattern: { type: "string", required: true, format: "regex", minLength: 1 },
         related: { type: "array", required: true, items: { type: "string" }, default: [] },
         strip: { type: "boolean", required: true, default: true },
-        transform: { type: "array", items: { type: "string", enum: ["totp", "totp-url"] }, required: true, default: [] },
+        transform: { type: "array", items: { type: "string", enum: ["totp", "totp-url", "luhn"] }, required: true, default: [] },
         trim: { type: "boolean", required: true, default: true },
     },
 };

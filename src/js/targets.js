@@ -42,8 +42,9 @@ export const defaultTargets = [
         class: "card",
         onMissing: "fallback",
         fallback: "secret",
-        fallbackMatch: "^(\\d[\\d -]{11,18}\\d)$", // only hoist/fill when the entry's secret looks like a card number
+        fallbackMatch: "^(\\d[\\d -]{11,18}\\d)$", // only consider secrets that look like a card number
         fallbackFailureInfo: false,
+        transform: ["luhn"], // only hoist/fill when the value passes the card-number checksum
         pattern: "^(card|card-number|ccn|credit-?card|debit-?card|card-?num):",
         related: ["cardholder", "cardexp", "cardexp-month", "cardexp-year", "cardcsc"],
     },
