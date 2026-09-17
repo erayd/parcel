@@ -40,7 +40,9 @@ export const defaultTargets = [
         label: "Card",
         hoist: true,
         class: "card",
-        onMissing: "naked-top",
+        onMissing: "fallback",
+        fallback: "secret",
+        fallbackMatch: "^(\\d[\\d -]{11,18}\\d)$", // only hoist/fill when the entry's secret looks like a card number
         pattern: "^(card|card-number|ccn|credit-?card|debit-?card|card-?num):",
         related: ["cardholder", "cardexp", "cardexp-month", "cardexp-year", "cardcsc"],
     },

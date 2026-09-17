@@ -10,6 +10,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert";
 import { defaultTargets } from "../src/js/targets.js";
 import { TargetSchema, Schema } from "../src/js/schema.js";
+import { Plaintext } from "../src/js/plaintext.js";
 
 describe("Default targets", () => {
     test("every entry validates against TargetSchema", () => {
@@ -40,6 +41,14 @@ describe("Default targets", () => {
             assert.ok(target, `Card target "${name}" not found in default targets`);
             assert.strictEqual(target.class, "card", `Target "${name}" should have class "card"`);
         }
+    });
+
+    test("card only resolves when the entry actually contains a card number", async () => {
+        const config = { targets: defaultTargets };
+        // a regular password entry must not hoist the secret as a card
+        assert.strictEqual(await new Plaintext("supersecretpassword\nlogin: user@example.com", config).getValue("card"), null);
+        // a naked card-number top line still resolves
+        assert.strictEqual(await new Plaintext("4111111111111111\nholder: alice", config).getValue("card"), "4111111111111111");
     });
 
     test("non-card targets default to class 'login'", () => {
