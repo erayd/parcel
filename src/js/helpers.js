@@ -166,7 +166,7 @@ export class Helpers {
                     return matches[1];
                 } catch (err) {
                     // If the fallback fails, we should throw a new error from here rather than exposing the fallback error
-                    console.info(err);
+                    if (targetRule.fallbackFailureInfo) console.info(err);
                     throw new Error(`No value found for field type: ${type}`);
                 }
             } else if (targetRule.onMissing === "null") {
