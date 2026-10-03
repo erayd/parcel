@@ -2,6 +2,78 @@
 
 This document outlines the findings from security reviews conducted on the project, and the maintainers' responses to them. Duplicate findings, and findings that do not detail a security vulnerability (e.g. simply note designed behaviour as intended / acceptable) are not listed, but are still present in the full reports.
 
+## [v1.0.8 / kimi-k3 + mimo-v2.6-pro](reviews/v1.0.8/merged-glm-5.3.md)
+
+Two-model security review using kimi-k3 and mimo-v2.6-pro, merged October 4, 2026 against Parcel v1.0.8 (commit `f34f710`, exactly at tag `v1.0.8`; release review - HEAD is at the tag, 0 commits ahead). Both models independently completed both phases of the review protocol including cross-verification.
+
+No CRITICAL or HIGH vulnerabilities were identified. The merged record carries eleven findings: one MEDIUM (finding disputed), eight LOW, and two INFORMATIONAL. Seven findings were reported by both models (each discovered by one model in phase 1 and independently reproduced by the other in phase 2; the phase-1 outputs were fully disjoint); four were reported by mimo-v2.6-pro only and disputed or not reproduced by kimi-k3. One severity dispute exists (F71L). The host-side enforcement boundary held under every attack attempted by either model: the whitelist, the passkey content-marker backstop, rpId/`allowCredentials` binding, the atomic rate-limiter state lock, the signer blacklist, and the host-version ratchet all survived live adversarial testing. Both models report `make test` 615/615 (35 suites) with built `chrome`/`firefox` bundles byte-identical to `src/`, and all previously-fixed findings verified intact.
+
+### F68M - Chrome: fill message without `origin` key skips the F34M destination-origin guard and the F6T warning (MEDIUM; finding disputed)
+
+**Description:** The popup populates the fill message's `origin` from `frameOrigin`, assigned only when the origin handshake completes (and `tab.url` is truthy); before that the fill carries `origin: undefined`, which Chrome's JSON port-message serialisation drops entirely, so the content script's `hasOwnProperty(msg, "origin")` gate at `integration.js:1261` never fires - the F34M destination-origin guard and the F6T cross-origin warning are both skipped, re-opening the mid-decrypt cross-origin fill scenario on Chrome under narrow timing preconditions (Firefox's structured clone preserves the key and refuses). Disputed: kimi-k3 did not reproduce it as a finding, holding it to be the rejected F51I edge (entries cannot be clicked before the match round trip, which post-dates the handshake); mimo-v2.6-pro argues the popup's own "your fill may still work" warning disproves the F51I rationale. TM1.
+
+**Response:** - *Pending maintainer response.*
+
+### F69L - `collect_roots` textual-only dedup: ancestor-pointing store symlinks cause unbounded root-queue growth, wedging the host (LOW)
+
+**Description:** With the non-default `allowLinks: true`, `collect_roots` deduplicates queued scan roots by textual path comparison only, never resolved targets; `find -H` re-discovers every collected link through each previously collected root under ever-longer textual spellings. Two ancestor-pointing symlinks in the same directory branch the path tree combinatorially (~2^40 queued roots), each spawning a `find` - the host wedges permanently on the next `list`/`changes_since`, and the watchdog respawn re-wedges. DoS only: no plaintext, key-material, whitelist, or audit impact; decrypts fail closed. Residual gap in the F17L fix (policy timing, not cycles). TM4, conditioned on the user-enabled option. Both models reproduced live.
+
+**Response:** - *Pending maintainer response.*
+
+### F70L - A rule pattern valid in JS but invalid in jq's Oniguruma silently wedges `action_list` (LOW)
+
+**Description:** The host evaluates `.parcel.json` rule patterns with jq's Oniguruma `test($pattern)` while the extension validates them as JS `RegExp` (u flag); the grammars diverge (e.g. `\p{Script_Extensions=Greek}` is JS-valid, Oniguruma-invalid; a pattern malformed in both engines wedges identically). On such a pattern the `action_list` jq pipeline exits non-zero with no stdout; the failure is masked by `local OUT="$(...)"` and `parcel_send` drops the empty payload, so the list request is never answered - a silent violation of the one-response-per-request invariant. Fails closed (empty `ALLOWED_FILES`, all decrypts denied); availability only. TM4 (crafted store config).
+
+**Response:** - *Pending maintainer response.*
+
+### F71L - Popup-spam guard bypassed by ceremony supersede/abort paths (LOW; severity disputed)
+
+**Description:** The WebAuthn popup-spam guard's dismissal streak is only incremented in `finish()`; the supersede and abort terminal paths settle ceremonies without touching it, so a page that supersedes or aborts each in-flight ceremony (rather than dismissing it) can raise consent popups without bound (PoC: 25/25 popups raised via supersede vs the 2-then-refuse control). Consent, rpId binding, and the host boundary are unaffected - impact is popup harassment, the documented bridge-forgery worst case. Severity disputed: mimo-v2.6-pro rates MEDIUM (confirmed bypass of a documented control with no overlapping backup), kimi-k3 rates LOW (F44L precedent; anti-annoyance control whose bypass yields the accepted annoyance class); the merge editor recorded LOW. TM1.
+
+**Response:** - *Pending maintainer response.*
+
+### F72L - `make extension`/`chrome`/`firefox` silently skip the Prettier step and execute `write(1)` instead (LOW)
+
+**Description:** The top-level `extension` target invokes the sub-make without forwarding `PRETTIER`, and `src/Makefile` gives it no default, so the `prettier` recipe expands to a leading `--write '...'`; GNU make strips the leading `-` as an ignore-errors marker and executes the Unix `write(1)` command with the glob as operand, its failure ignored. Every documented build target silently skips formatting; only `make prettier`/`make test` format. No shipped-artefact divergence (CI's `prettier --check` gates it; bundles verified byte-identical); the residue is build-log-concealed drift plus an unexpected build-time binary invocation. TM5/TM0.
+
+**Response:** - *Pending maintainer response.*
+
+### F73L - SECURITY.md:87 overstates parcelrc fail-closed behaviour (LOW)
+
+**Description:** SECURITY.md:87 promises that malformed content in either parcelrc file refuses startup; the implementation makes only `VALID_SIGNERS`/`HOST_HASH`/binary-shape violations fatal, while malformed `BLACKLIST_SIGNERS`, `MINIMUM_HOST_VERSION`, and non-absolute path values are ignored with a logfile note (a behaviour the test suite pins deliberately). An admin's typo'd durable revocation in `/etc/parcelrc` is silently dropped, leaving the intended-to-be-revoked signing key trusted. Bounded: a valid `VALID_SIGNERS` signature is still required; no attacker-reachable path. TM0.
+
+**Response:** - *Pending maintainer response.*
+
+### F74L - Passkey/HTTP-auth consent guarantees phrased as absolutes that do not hold under the accepted TM2 posture (LOW)
+
+**Description:** SECURITY.md:146/:166 lead with "No signature is produced without you explicitly selecting a credential in the consent popup" / "No credentials are supplied without explicit user selection in the popup"; under the maintainer-accepted F40M/F59M posture a compromised extension context can drive `decrypt` and `passkey` `assert`/`create` on whitelisted entries with no consent interaction (the host has no consent gate by design). The trailing clauses are correctly page-scoped; the leading absolutes are not. Documentation tension only - the missing gate is the rejected F59M itself. TM0.
+
+**Response:** - *Pending maintainer response.*
+
+### F75L - Rule-less entry aborts the whole popup render batch (LOW; finding disputed)
+
+**Description:** The host matches entries with jq's Oniguruma engine while the extension re-matches with JS `RegExp`; an entry matching a rule host-side but not extension-side yields `entry.rule: undefined`, and `popup.js:929`/`:945` dereference `entry.rule.tag`/`.strip` unguarded, aborting the render batch (mimo PoC: 0 of 2 entries rendered; kimi-k3 notes the throw is caught by `scheduleRender` and that no concrete divergent pattern pair was demonstrated). UI denial of service only; nothing is decrypted by rendering. Disputed: kimi-k3 did not reproduce it as a finding (residual R10). TM4.
+
+**Response:** - *Pending maintainer response.*
+
+### F76L - Timestamp rules let a stale `src/dist` (incl. `parcel-host.asc`) ship (LOW; finding disputed)
+
+**Description:** `dist/parcel-host` and `.asc` are built by timestamp rules against the source; restoring the source with an older mtime (archived extraction, clock skew, `SIGN_KEY` switch without `make clean`) makes make consider the artefacts up to date, and the previous build's host script and signature ship unchanged into `chrome/`/`firefox/`. The pair stays internally consistent and signature-valid; `MINIMUM_HOST_VERSION`/`HOST_HASH` bound replay of old versions - impact is parity/review-trail integrity on ad-hoc builds (the `release` target depends on `clean`). Disputed: kimi-k3 did not reproduce it as a finding (residual R15). TM5.
+
+**Response:** - *Pending maintainer response.*
+
+### F77I - Comment overstates the constrain-height token's forgery protection (INFORMATIONAL)
+
+**Description:** The comment above the popup's `constrain-height` handler claims the token check stops "a page or another frame" from forging the instruction; the token travels in the popup iframe's `src`, which the hosting page can read (F39T posture), so the check stops other frames but not the page. Impact of a forged message is popup sizing only (F28T class). TM0.
+
+**Response:** - *Pending maintainer response.*
+
+### F78I - `window.open` help link vs "no network access, for any reason" (INFORMATIONAL; classification disputed)
+
+**Description:** The passkey-conflict notice's documentation button opens a hardcoded GitHub URL via user-initiated `window.open` with `noopener,noreferrer`; the constitution/SECURITY.md state the extension must not interact with network resources "for any reason". No data flows and the CSP still blocks programmatic requests - the tension is literal wording vs a user-initiated navigation. kimi-k3 classifies this as the user's browser acting on an explicit click (residual R16), not Parcel interacting with network resources. TM0.
+
+**Response:** - *Pending maintainer response.*
+
 ## [v1.0.7 / kimi-k3 + glm-5.3](reviews/v1.0.7/merged-glm-5.3-flash.md)
 
 Two-model security review using kimi-k3 and glm-5.3, merged September 12, 2026 against Parcel v1.0.7 (commit `099857c`, exactly at tag `v1.0.7`; release review - HEAD is at the tag, 0 commits ahead). Both models independently completed both phases of the review protocol including cross-verification.
