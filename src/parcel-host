@@ -25,7 +25,7 @@ TOKEN="broadcast"
 # candidate script whose version is lower than the effective minimum (the
 # higher of the parcelrc and state-file floors), and the value is persisted
 # to the state file by save_state, completing the ratchet.
-HOST_VERSION="1"
+HOST_VERSION="2"
 # ratchet the in-memory floor: no later install in this session may be older
 if (( 10#$HOST_VERSION > 10#${MINIMUM_HOST_VERSION:-0} )); then
     MINIMUM_HOST_VERSION="$HOST_VERSION"
