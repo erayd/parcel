@@ -1,5 +1,4 @@
 VERSION ?= $(shell cat .version)
-CURRENT_VERSION := $(shell cat .version)
 
 PRETTIER := $(PWD)/node_modules/.bin/prettier
 ESLINT := $(PWD)/node_modules/.bin/eslint
@@ -64,10 +63,9 @@ firefox: extension
 setup:
 	./scripts/generate-setup.sh
 
-.PHONY: release
-release: clean extension
-ifeq ($(VERSION), $(CURRENT_VERSION))
-else
+# Bump must run before extension so the host script is signed after HOST_VERSION is updated.
+.PHONY: bump
+bump:
 	echo $(VERSION) > .version
 	jq ".version = \"$(VERSION)\"" src/manifest.json | $(PRETTIER) --parser json | sponge src/manifest.json
 	$(PRETTIER) --write src/manifest.json
@@ -76,7 +74,9 @@ else
 	git add .version src/manifest.json src/parcel-host
 	git commit -S -m "Release v$(VERSION)"
 	git tag -s -m "Release v$(VERSION)" v$(VERSION)
-endif
+
+.PHONY: release
+release: clean bump extension
 	$(MAKE) setup
 	$(MAKE) chrome firefox
 	[ -d dist ] || mkdir -p dist
