@@ -234,6 +234,8 @@ fi
 
 # transmit message in native messaging host protocol
 function parcel_transmit() {
+    # Chrome terminates native hosts that send messages over 1MiB; deliberately unhandled here since
+    # no parcel message approaches that limit, and any future workaround belongs in src/parcel-host.
     local LC_ALL=C
     local s=$1 n=${#1} b
     printf -v b '\\x%02x\\x%02x\\x%02x\\x%02x' \
