@@ -65,17 +65,19 @@ setup:
 	./scripts/generate-setup.sh
 
 .PHONY: release
-release: clean extension setup
+release: clean extension
 ifeq ($(VERSION), $(CURRENT_VERSION))
 else
 	echo $(VERSION) > .version
 	jq ".version = \"$(VERSION)\"" src/manifest.json | $(PRETTIER) --parser json | sponge src/manifest.json
 	$(PRETTIER) --write src/manifest.json
+	awk '/^HOST_VERSION="[0-9]+"$$/ { printf "HOST_VERSION=\"%d\"\n", substr($$0, 15, length($$0) - 15) + 1; next } { print }' src/parcel-host | sponge src/parcel-host
 	git reset
-	git add .version src/manifest.json
+	git add .version src/manifest.json src/parcel-host
 	git commit -m "Release v$(VERSION)"
 	git tag v$(VERSION)
 endif
+	$(MAKE) setup
 	$(MAKE) chrome firefox
 	[ -d dist ] || mkdir -p dist
 	git archive -o dist/parcel-$(VERSION).tar --format tar --prefix=parcel-$(VERSION)/ v$(VERSION)
