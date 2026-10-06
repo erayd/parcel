@@ -678,7 +678,8 @@ function action_list() {
             IS_LINK+="$linked"$'\n'
         fi
     done <<< "$FIND_OUT"
-    local OUT="$(
+    local OUT JQ_RC=0
+    OUT="$(
             jq -n --rawfile path <(echo "$FIND_OUT") --rawfile real <(echo "$REAL_OUT") --rawfile is_link <(echo "$IS_LINK") '
                 [$path, $real, $is_link]
                 | map(rtrimstr("\n") | split("\n") | map(select(length > 0)))
@@ -719,7 +720,12 @@ function action_list() {
                 )
             ' \
                 <(echo "$CONFIG") -
-    )"
+    )" || JQ_RC=$?
+    if [ "$JQ_RC" -ne 0 ]; then
+        # jq can fail for other reasons, but regex failure is the most likely due to engine differences between jq and the JS validator
+        parcel_error "Unable to evaluate entry rules; check that all rule patterns are valid regular expressions"
+        return 0
+    fi
 
     # kludgery required to set a global array's content using a string of single-quoted strings
     declare -a LOCAL_AF="( $(jq -rc 'map(.path) | @sh' <<< "$OUT") )"
