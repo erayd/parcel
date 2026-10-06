@@ -12,7 +12,7 @@ No CRITICAL or HIGH vulnerabilities were identified. The merged record carries e
 
 **Description:** The popup populates the fill message's `origin` from `frameOrigin`, assigned only when the origin handshake completes (and `tab.url` is truthy); before that the fill carries `origin: undefined`, which Chrome's JSON port-message serialisation drops entirely, so the content script's `hasOwnProperty(msg, "origin")` gate at `integration.js:1261` never fires - the F34M destination-origin guard and the F6T cross-origin warning are both skipped, re-opening the mid-decrypt cross-origin fill scenario on Chrome under narrow timing preconditions (Firefox's structured clone preserves the key and refuses). Disputed: kimi-k3 did not reproduce it as a finding, holding it to be the rejected F51I edge (entries cannot be clicked before the match round trip, which post-dates the handshake); mimo-v2.6-pro argues the popup's own "your fill may still work" warning disproves the F51I rationale. TM1.
 
-**Response:** *Pending maintainer response.*
+**Response:** Fixed in #234 by seeing the origin from the tab. Definitely a valid finding (albeit should have been LOW due to being largely impractical due to the timing requirements and of minimal impact: failure worst-case was an origin mismatch warning to the user).
 
 ### F69L - `collect_roots` textual-only dedup: ancestor-pointing store symlinks cause unbounded root-queue growth, wedging the host (LOW)
 
