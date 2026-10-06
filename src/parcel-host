@@ -730,8 +730,7 @@ function action_list() {
                 <(echo "$CONFIG") -
     )" || JQ_RC=$?
     if [ "$JQ_RC" -ne 0 ]; then
-        # jq can fail for other reasons, but regex failure is the most likely due to engine differences between jq and the JS validator
-        parcel_error "Unable to evaluate entry rules; check that all rule patterns are valid regular expressions"
+        parcel_error "Unable to evaluate entry rules"
         return 0
     fi
 
