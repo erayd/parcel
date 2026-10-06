@@ -36,7 +36,7 @@ No CRITICAL or HIGH vulnerabilities were identified. The merged record carries e
 
 **Description:** The top-level `extension` target invokes the sub-make without forwarding `PRETTIER`, and `src/Makefile` gives it no default, so the `prettier` recipe expands to a leading `--write '...'`; GNU make strips the leading `-` as an ignore-errors marker and executes the Unix `write(1)` command with the glob as operand, its failure ignored. Every documented build target silently skips formatting; only `make prettier`/`make test` format. No shipped-artefact divergence (CI's `prettier --check` gates it; bundles verified byte-identical); the residue is build-log-concealed drift plus an unexpected build-time binary invocation. TM5/TM0.
 
-**Response:** *Pending maintainer response.*
+**Response:** Passed to sub-make in commit ec0e14a.
 
 ### F73L - SECURITY.md:87 overstates parcelrc fail-closed behaviour (LOW)
 
