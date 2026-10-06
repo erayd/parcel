@@ -24,7 +24,7 @@ No CRITICAL or HIGH vulnerabilities were identified. The merged record carries e
 
 **Description:** The host evaluates `.parcel.json` rule patterns with jq's Oniguruma `test($pattern)` while the extension validates them as JS `RegExp` (u flag); the grammars diverge (e.g. `\p{Script_Extensions=Greek}` is JS-valid, Oniguruma-invalid; a pattern malformed in both engines wedges identically). On such a pattern the `action_list` jq pipeline exits non-zero with no stdout; the failure is masked by `local OUT="$(...)"` and `parcel_send` drops the empty payload, so the list request is never answered - a silent violation of the one-response-per-request invariant. Fails closed (empty `ALLOWED_FILES`, all decrypts denied); availability only. TM4 (crafted store config).
 
-**Response:** *Pending maintainer response.*
+**Response:** Fixed in #235 by separately validating rule patterns in JQ as well.
 
 ### F71L - Popup-spam guard bypassed by ceremony supersede/abort paths (LOW; severity disputed)
 
